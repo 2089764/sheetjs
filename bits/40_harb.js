@@ -347,6 +347,7 @@ function sheet_to_dbf(ws/*:Worksheet*/, opts/*:WriteOpts*/) {
 				case 'N':
 					var _n = "0";
 					if(typeof data[i][j] == "number") _n = data[i][j].toFixed(coldecimals[j]||0);
+					if(_n.length > colwidths[j]) _n = _n.slice(0, colwidths[j]); // addresses decimal > width
 					for(hcnt=0; hcnt < colwidths[j]-_n.length; ++hcnt) rout.write_shift(1, 0x20);
 					rout.write_shift(1, _n, "sbcs");
 					break;
