@@ -245,7 +245,7 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 		var sheetag/*:: = {name:"", '名称':""}*/;
 		var rowtag/*:: = {'行号':""}*/;
 		var Sheets = {}, SheetNames/*:Array<string>*/ = [];
-		var ws = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
+		var ws = ({}/*:any*/); if(opts.dense) ws["!data"] = [];
 		var Rn, q/*:: :any = ({t:"", v:null, z:null, w:"",c:[],}:any)*/;
 		var ctag = ({value:""}/*:any*/);
 		var textp = "", textpidx = 0, textptag/*:: = {}*/;
@@ -289,7 +289,7 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 					sheetag = parsexmltag(Rn[0], false);
 					R = C = -1;
 					range.s.r = range.s.c = 10000000; range.e.r = range.e.c = 0;
-					ws = opts.dense ? ([]/*:any*/) : ({}/*:any*/); merges = [];
+					ws = ({}/*:any*/); if(opts.dense) ws["!data"] = []; merges = [];
 					rowinfo = [];
 					intable = true;
 				}
@@ -309,7 +309,7 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 			case 'covered-table-cell': // 9.1.5 <table:covered-table-cell>
 				if(Rn[1] !== '/') ++C;
 				if(opts.sheetStubs) {
-					if(opts.dense) { if(!ws[R]) ws[R] = []; ws[R][C] = {t:'z'}; }
+					if(opts.dense) { if(!ws["!data"][R]) ws["!data"][R] = []; ws["!data"][R][C] = {t:'z'}; }
 					else ws[encode_cell({r:R,c:C})] = {t:'z'};
 				}
 				textp = ""; textR = [];
@@ -325,10 +325,10 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 					if((ctag['数据类型'] || ctag['value-type']) == "string") {
 						q.t = "s"; q.v = unescapexml(ctag['string-value'] || "");
 						if(opts.dense) {
-							if(!ws[R]) ws[R] = [];
-							ws[R][C] = q;
+							if(!ws["!data"][R]) ws["!data"][R] = [];
+							ws["!data"][R][C] = q;
 						} else {
-							ws[encode_cell({r:R,c:C})] = q;
+							ws[encode_col(C) + encode_row(R)] = q;
 						}
 					}
 					C+= colpeat-1;
@@ -405,9 +405,9 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 							for(var rpt = 0; rpt < rowpeat; ++rpt) {
 								colpeat = parseInt(ctag['number-columns-repeated']||"1", 10);
 								if(opts.dense) {
-									if(!ws[R + rpt]) ws[R + rpt] = [];
-									ws[R + rpt][C] = rpt == 0 ? q : dup(q);
-									while(--colpeat > 0) ws[R + rpt][C + colpeat] = dup(q);
+									if(!ws["!data"][R + rpt]) ws["!data"][R + rpt] = [];
+									ws["!data"][R + rpt][C] = rpt == 0 ? q : dup(q);
+									while(--colpeat > 0) ws["!data"][R + rpt][C + colpeat] = dup(q);
 								} else {
 									ws[encode_cell({r:R + rpt,c:C})] = q;
 									while(--colpeat > 0) ws[encode_cell({r:R + rpt,c:C + colpeat})] = dup(q);

@@ -1,8 +1,8 @@
 /* note: browser DOM element cannot see mso- style attrs, must parse */
 function html_to_sheet(str/*:string*/, _opts)/*:Workbook*/ {
 	var opts = _opts || {};
-	if(DENSE != null && opts.dense == null) opts.dense = DENSE;
-	var ws/*:Worksheet*/ = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
+	var dense = (opts.dense != null) ? opts.dense : DENSE;
+	var ws/*:Worksheet*/ = ({}/*:any*/); if(dense) ws["!data"] = [];
 	str = str.replace(/<!--.*?-->/g, "");
 	var mtch/*:any*/ = str.match(/<table/i);
 	if(!mtch) throw new Error("Invalid HTML: could not find <table>");
@@ -48,7 +48,7 @@ function html_to_sheet(str/*:string*/, _opts)/*:Workbook*/ {
 				if(!opts.cellDates) o = ({t:'n', v:datenum(o.v)}/*:any*/);
 				o.z = opts.dateNF || table_fmt[14];
 			}
-			if(opts.dense) { if(!ws[R]) ws[R] = []; ws[R][C] = o; }
+			if(dense) { if(!ws["!data"][R]) ws["!data"][R] = []; ws["!data"][R][C] = o; }
 			else ws[encode_cell({r:R, c:C})] = o;
 			C += CS;
 		}
@@ -61,6 +61,7 @@ function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HT
 	var M/*:Array<Range>*/ = (ws['!merges'] ||[]);
 	var oo/*:Array<string>*/ = [];
 	var sp = ({}/*:any*/);
+	var dense = ws["!data"] != null;
 	for(var C = r.s.c; C <= r.e.c; ++C) {
 		var RS = 0, CS = 0;
 		for(var j = 0; j < M.length; ++j) {
@@ -70,8 +71,8 @@ function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HT
 			RS = M[j].e.r - M[j].s.r + 1; CS = M[j].e.c - M[j].s.c + 1; break;
 		}
 		if(RS < 0) continue;
-		var coord = encode_cell({r:R,c:C});
-		var cell = o.dense ? (ws[R]||[])[C] : ws[coord];
+		var coord = encode_col(C) + encode_row(R);
+		var cell = dense ? (ws["!data"][R]||[])[C] : ws[coord];
 		/* TODO: html entities */
 		var w = (cell && cell.v != null) && (cell.h || escapehtml(cell.w || (format_cell(cell), cell.w) || "")) || "";
 		sp = ({}/*:any*/);
@@ -119,7 +120,6 @@ function sheet_to_html(ws/*:Worksheet*/, opts/*:?Sheet2HTMLOpts*//*, wb:?Workboo
 	var footer = o.footer != null ? o.footer : HTML_END;
 	var out/*:Array<string>*/ = [header];
 	var r = decode_range(ws['!ref']);
-	o.dense = Array.isArray(ws);
 	out.push(make_html_preamble(ws, r, o));
 	for(var R = r.s.r; R <= r.e.r; ++R) out.push(make_html_row(ws, r, R, o));
 	out.push("</table>" + footer);
@@ -134,7 +134,7 @@ function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/
 	}
 
 	var opts = _opts || {};
-	if(DENSE != null) opts.dense = DENSE;
+	var dense = ws["!data"] != null;
 	var or_R = 0, or_C = 0;
 	if(opts.origin != null) {
 		if(typeof opts.origin == 'number') or_R = opts.origin;
@@ -199,7 +199,7 @@ function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/
 				l = Aelts[Aelti].getAttribute("href"); if(l.charAt(0) != "#") break;
 			}
 			if(l && l.charAt(0) != "#" &&	l.slice(0, 11).toLowerCase() != 'javascript:') o.l = ({ Target: l });
-			if(opts.dense) { if(!ws[R + or_R]) ws[R + or_R] = []; ws[R + or_R][C + or_C] = o; }
+			if(dense) { if(!ws["!data"][R + or_R]) ws["!data"][R + or_R] = []; ws["!data"][R + or_R][C + or_C] = o; }
 			else ws[encode_cell({c:C + or_C, r:R + or_R})] = o;
 			if(range.e.c < C + or_C) range.e.c = C + or_C;
 			C += CS;
@@ -215,7 +215,7 @@ function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/
 
 function parse_dom_table(table/*:HTMLElement*/, _opts/*:?any*/)/*:Worksheet*/ {
 	var opts = _opts || {};
-	var ws/*:Worksheet*/ = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
+	var ws/*:Worksheet*/ = ({}/*:any*/); if(opts.dense) ws["!data"] = [];
 	return sheet_add_dom(ws, table, _opts);
 }
 

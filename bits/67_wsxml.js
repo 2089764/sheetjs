@@ -20,7 +20,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	if(DENSE != null && opts.dense == null) opts.dense = DENSE;
 
 	/* 18.3.1.99 worksheet CT_Worksheet */
-	var s = opts.dense ? ([]/*:any*/) : ({}/*:any*/);
+	var s = ({}/*:any*/); if(opts.dense) s["!data"] = [];
 	var refguess/*:Range*/ = ({s: {r:2000000, c:2000000}, e: {r:0, c:0} }/*:any*/);
 
 	var data1 = "", data2 = "";
@@ -149,7 +149,7 @@ function write_ws_xml_protection(sp)/*:string*/ {
 }
 
 function parse_ws_xml_hlinks(s, data/*:Array<string>*/, rels) {
-	var dense = Array.isArray(s);
+	var dense = s["!data"] != null;
 	for(var i = 0; i != data.length; ++i) {
 		var val = parsexmltag(utf8read(data[i]), true);
 		if(!val.ref) return;
@@ -165,11 +165,11 @@ function parse_ws_xml_hlinks(s, data/*:Array<string>*/, rels) {
 		if(val.tooltip) { val.Tooltip = val.tooltip; delete val.tooltip; }
 		var rng = safe_decode_range(val.ref);
 		for(var R=rng.s.r;R<=rng.e.r;++R) for(var C=rng.s.c;C<=rng.e.c;++C) {
-			var addr = encode_cell({c:C,r:R});
+			var addr = encode_col(C) + encode_row(R);
 			if(dense) {
-				if(!s[R]) s[R] = [];
-				if(!s[R][C]) s[R][C] = {t:"z",v:undefined};
-				s[R][C].l = val;
+				if(!s["!data"][R]) s["!data"][R] = [];
+				if(!s["!data"][R][C]) s["!data"][R][C] = {t:"z",v:undefined};
+				s["!data"][R][C].l = val;
 			} else {
 				if(!s[addr]) s[addr] = {t:"z",v:undefined};
 				s[addr].l = val;
@@ -321,7 +321,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var do_format = Array.isArray(styles.CellXf), cf;
 	var arrayf/*:Array<[Range, string]>*/ = [];
 	var sharedf = [];
-	var dense = Array.isArray(s);
+	var dense = s["!data"] != null;
 	var rows/*:Array<RowInfo>*/ = [], rowobj = {}, rowrite = false;
 	var sheetStubs = !!opts.sheetStubs;
 	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
@@ -486,8 +486,8 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 			}
 			if(dense) {
 				var _r = decode_cell(tag.r);
-				if(!s[_r.r]) s[_r.r] = [];
-				s[_r.r][_r.c] = p;
+				if(!s["!data"][_r.r]) s["!data"][_r.r] = [];
+				s["!data"][_r.r][_r.c] = p;
 			} else s[tag.r] = p;
 		}
 	}
@@ -496,7 +496,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 
 function write_ws_xml_data(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbook*//*::, rels*/)/*:string*/ {
 	var o/*:Array<string>*/ = [], r/*:Array<string>*/ = [], range = safe_decode_range(ws['!ref']), cell="", ref, rr = "", cols/*:Array<string>*/ = [], R=0, C=0, rows = ws['!rows'];
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var params = ({r:rr}/*:any*/), row/*:RowInfo*/, height = -1;
 	for(C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(R = range.s.r; R <= range.e.r; ++R) {
@@ -504,7 +504,7 @@ function write_ws_xml_data(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbook
 		rr = encode_row(R);
 		for(C = range.s.c; C <= range.e.c; ++C) {
 			ref = cols[C] + rr;
-			var _cell = dense ? (ws[R]||[])[C]: ws[ref];
+			var _cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 			if(_cell === undefined) continue;
 			if((cell = write_ws_xml_cell(_cell, ref, ws, opts, idx, wb)) != null) r.push(cell);
 		}

@@ -75,20 +75,20 @@ function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 }
 
 function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var range = safe_decode_range(ws['!ref'] || "A1"), ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
 	if(range.e.c > 0xFF || range.e.r > 0x3FFF) {
 		if(opts.WTF) throw new Error("Range " + (ws['!ref'] || "A1") + " exceeds format limit A1:IV16384");
 		range.e.c = Math.min(range.e.c, 0xFF);
 		range.e.r = Math.min(range.e.c, 0x3FFF);
-		ref = encode_range(range);
 	}
+	var row = [];
+	for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(var R = range.s.r; R <= range.e.r; ++R) {
+		if(dense) row = ws["!data"][R] || [];
 		rr = encode_row(R);
-		for(var C = range.s.c; C <= range.e.c; ++C) {
-			if(R === range.s.r) cols[C] = encode_col(C);
-			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+		for(C = range.s.c; C <= range.e.c; ++C) {
+			var cell = dense ? row[C] : ws[cols[C] + rr];
 			if(!cell) continue;
 			/* write cell */
 			write_ws_biff2_cell(ba, cell, R, C, opts);
@@ -99,7 +99,6 @@ function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/
 /* Based on test files */
 function write_biff2_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 	var o = opts || {};
-	if(DENSE != null && o.dense == null) o.dense = DENSE;
 	var ba = buf_array();
 	var idx = 0;
 	for(var i=0;i<wb.SheetNames.length;++i) if(wb.SheetNames[i] == o.sheet) idx=i;
@@ -207,7 +206,7 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	var s = wb.SheetNames[idx], ws = wb.Sheets[s] || {};
 	var _WB/*:WBWBProps*/ = ((wb||{}).Workbook||{}/*:any*/);
 	var _sheet/*:WBWSProp*/ = ((_WB.Sheets||[])[idx]||{}/*:any*/);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var b8 = opts.biff == 8;
 	var ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
 	var range = safe_decode_range(ws['!ref'] || "A1");
@@ -243,12 +242,14 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 
 	if(b8) ws['!links'] = [];
 	var comments = [];
+	var row = [];
+	for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(var R = range.s.r; R <= range.e.r; ++R) {
+		if(dense) row = ws["!data"][R] || [];
 		rr = encode_row(R);
-		for(var C = range.s.c; C <= range.e.c; ++C) {
-			if(R === range.s.r) cols[C] = encode_col(C);
+		for(C = range.s.c; C <= range.e.c; ++C) {
 			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			var cell = dense ? row[C] : ws[ref];
 			if(!cell) continue;
 			/* write cell */
 			write_ws_biff8_cell(ba, cell, R, C, opts);

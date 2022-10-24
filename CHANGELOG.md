@@ -4,6 +4,12 @@ This log is intended to keep track of backwards-incompatible changes, including
 but not limited to API changes and file location changes.  Minor behavioral
 changes may not be included if they are not expected to break existing code.
 
+## v0.19.0
+
+* XLSX export hyperlinks compatible with google sheets (h/t Evan Bovie)
+* NUMBERS export multiple sheets, full worksheet range
+* formalized `dense` mode
+
 ## v0.18.12
 
 * `package.json` added types in `exports` structure

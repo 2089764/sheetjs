@@ -306,7 +306,7 @@ sleuth_fat(difat_start, difat_sec_cnt, sectors, ssz, fat_addrs);
 /** Chains */
 var sector_list/*:SectorList*/ = make_sector_list(sectors, dir_start, fat_addrs, ssz);
 
-sector_list[dir_start].name = "!Directory";
+if(dir_start < sector_list.length) sector_list[dir_start].name = "!Directory";
 if(nmfs > 0 && minifat_start !== ENDOFCHAIN) sector_list[minifat_start].name = "!MiniFAT";
 sector_list[fat_addrs[0]].name = "!FAT";
 sector_list.fat_addrs = fat_addrs;

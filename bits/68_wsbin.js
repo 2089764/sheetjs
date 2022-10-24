@@ -41,12 +41,13 @@ function write_BrtRowHdr(R/*:number*/, range, ws) {
 	o.l += 4;
 
 	var caddr = {r:R, c:0};
+	var dense = ws["!data"] != null;
 	for(var i = 0; i < 16; ++i) {
 		if((range.s.c > ((i+1) << 10)) || (range.e.c < (i << 10))) continue;
 		var first = -1, last = -1;
 		for(var j = (i<<10); j < ((i+1)<<10); ++j) {
 			caddr.c = j;
-			var cell = Array.isArray(ws) ? (ws[caddr.r]||[])[caddr.c] : ws[encode_cell(caddr)];
+			var cell = dense ? (ws["!data"][caddr.r]||[])[caddr.c] : ws[encode_cell(caddr)];
 			if(cell) { if(first < 0) first = j; last = j; }
 		}
 		if(first < 0) continue;
@@ -510,7 +511,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 	var opts = _opts || {};
 	if(!rels) rels = {'!id':{}};
 	if(DENSE != null && opts.dense == null) opts.dense = DENSE;
-	var s/*:Worksheet*/ = (opts.dense ? [] : {});
+	var s/*:Worksheet*/ = ({}); if(opts.dense) s["!data"] = [];
 
 	var ref;
 	var refguess = {s: {r:2000000, c:2000000}, e: {r:0, c:0} };
@@ -586,7 +587,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				}
 				if((cf = styles.CellXf[val[0].iStyleRef])) safe_format(p,cf.numFmtId,null,opts, themes, styles);
 				C = val[0].c == -1 ? C + 1 : val[0].c;
-				if(opts.dense) { if(!s[R]) s[R] = []; s[R][C] = p; }
+				if(opts.dense) { if(!s["!data"][R]) s["!data"][R] = []; s["!data"][R][C] = p; }
 				else s[encode_col(C) + rr] = p;
 				if(opts.cellFormula) {
 					af = false;
@@ -619,7 +620,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				if(!opts.sheetStubs || pass) break;
 				p = ({t:'z',v:void 0}/*:any*/);
 				C = val[0].c == -1 ? C + 1 : val[0].c;
-				if(opts.dense) { if(!s[R]) s[R] = []; s[R][C] = p; }
+				if(opts.dense) { if(!s["!data"][R]) s["!data"][R] = []; s["!data"][R][C] = p; }
 				else s[encode_col(C) + rr] = p;
 				if(refguess.s.r > row.r) refguess.s.r = row.r;
 				if(refguess.s.c > C) refguess.s.c = C;
@@ -650,11 +651,11 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				}
 				for(R=val.rfx.s.r;R<=val.rfx.e.r;++R) for(C=val.rfx.s.c;C<=val.rfx.e.c;++C) {
 					if(opts.dense) {
-						if(!s[R]) s[R] = [];
-						if(!s[R][C]) s[R][C] = {t:'z',v:undefined};
-						s[R][C].l = val;
+						if(!s["!data"][R]) s["!data"][R] = [];
+						if(!s["!data"][R][C]) s["!data"][R][C] = {t:'z',v:undefined};
+						s["!data"][R][C].l = val;
 					} else {
-						addr = encode_cell({c:C,r:R});
+						addr = encode_col(C) + encode_row(R);
 						if(!s[addr]) s[addr] = {t:'z',v:undefined};
 						s[addr].l = val;
 					}
@@ -664,14 +665,14 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 			case 0x01AA: /* 'BrtArrFmla' */
 				if(!opts.cellFormula) break;
 				arrayf.push(val);
-				cell = ((opts.dense ? s[R][C] : s[encode_col(C) + rr])/*:any*/);
+				cell = ((opts.dense ? s["!data"][R][C] : s[encode_col(C) + rr])/*:any*/);
 				cell.f = stringify_formula(val[1], refguess, {r:row.r, c:C}, supbooks, opts);
 				cell.F = encode_range(val[0]);
 				break;
 			case 0x01AB: /* 'BrtShrFmla' */
 				if(!opts.cellFormula) break;
 				sharedf[encode_cell(val[0].s)] = val[1];
-				cell = (opts.dense ? s[R][C] : s[encode_col(C) + rr]);
+				cell = (opts.dense ? s["!data"][R][C] : s[encode_col(C) + rr]);
 				cell.f = stringify_formula(val[1], refguess, {r:row.r, c:C}, supbooks, opts);
 				break;
 
@@ -864,7 +865,7 @@ function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:num
 function write_CELLTABLE(ba, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
 	var range = safe_decode_range(ws['!ref'] || "A1"), ref, rr = "", cols/*:Array<string>*/ = [];
 	write_record(ba, 0x0091 /* BrtBeginSheetData */);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var cap = range.e.r;
 	if(ws['!rows']) cap = Math.max(range.e.r, ws['!rows'].length - 1);
 	for(var R = range.s.r; R <= cap; ++R) {
@@ -877,7 +878,7 @@ function write_CELLTABLE(ba, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Work
 			/* *16384CELL */
 			if(R === range.s.r) cols[C] = encode_col(C);
 			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			var cell = dense ? (ws["!data"][R]||[])[C] : ws[ref];
 			if(!cell) { last_seen = false; continue; }
 			/* write cell */
 			last_seen = write_ws_bin_cell(ba, cell, R, C, opts, ws, last_seen);

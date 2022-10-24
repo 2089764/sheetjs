@@ -1,4 +1,4 @@
-import { WorkBook, WorkSheet, Range, CellObject } from '../';
+import { WorkBook, WorkSheet, Range, CellObject, DenseSheet, SparseSheet } from '../';
 import type { utils } from "../";
 
 declare var encode_cell: typeof utils.encode_cell;
@@ -26,13 +26,16 @@ function rtf_to_sheet(d/*:RawData*/, opts)/*:Worksheet*/ {
 function rtf_to_sheet_str(str: string, opts)/*:Worksheet*/ {
 	var o = opts || {};
 	// ESBuild issue 2375
-	var ws: WorkSheet = o.dense ? [] : ({}/*:any*/);
+	var ws: WorkSheet = {} as WorkSheet;
+	var dense = o.dense;
+	if(dense) ws["!data"] = [];
 
 	var rows = str.match(/\\trowd[\s\S]*?\\row\b/g);
 	if(!rows) throw new Error("RTF missing table");
 	var range: Range = {s: {c:0, r:0}, e: {c:0, r:rows.length - 1}};
+	var row: CellObject[] = [];
 	rows.forEach(function(rowtf, R) {
-		if(Array.isArray(ws)) ws[R] = [];
+		if(dense) row = (ws as DenseSheet)["!data"][R] = [] as CellObject[];
 		var rtfre = /\\[\w\-]+\b/g;
 		var last_index = 0;
 		var res;
@@ -51,8 +54,8 @@ function rtf_to_sheet_str(str: string, opts)/*:Worksheet*/ {
 						if(cell.v == "TRUE" || cell.v == "FALSE") { cell.v = cell.v == "TRUE"; cell.t = "b"; }
 						else if(!isNaN(fuzzynum(cell.v as string))) { cell.t = 'n'; if(o.cellText !== false) cell.w = cell.v as string; cell.v = fuzzynum(cell.v as string); }
 
-						if(Array.isArray(ws)) ws[R][C] = cell;
-						else ws[encode_cell({r:R, c:C})] = cell;
+						if(dense) row[C] = cell;
+						else (ws as SparseSheet)[encode_cell({r:R, c:C})] = cell;
 					}
 					payload = [];
 					break;
@@ -79,14 +82,15 @@ function sheet_to_rtf(ws: WorkSheet, opts): string {
 	var o: string[] = ["{\\rtf1\\ansi"];
 	if(!ws["!ref"]) return o[0] + "}";
 	var r = safe_decode_range(ws['!ref']), cell: CellObject;
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null, row: CellObject[] = [];
 	for(var R = r.s.r; R <= r.e.r; ++R) {
 		o.push("\\trowd\\trautofit1");
 		for(var C = r.s.c; C <= r.e.c; ++C) o.push("\\cellx" + (C+1));
 		o.push("\\pard\\intbl");
+		if(dense) row = (ws as DenseSheet)["!data"][R] || ([] as CellObject[])
 		for(C = r.s.c; C <= r.e.c; ++C) {
 			var coord = encode_cell({r:R,c:C});
-			cell = dense ? (ws[R]||[])[C]: ws[coord];
+			cell = dense ? row[C] : (ws as SparseSheet)[coord];
 			if(!cell || cell.v == null && (!cell.f || cell.F)) { o.push(" \\cell"); continue; }
 			o.push(" " + (cell.w || (format_cell(cell), cell.w) || "").replace(/[\r\n]/g, "\\par "));
 			o.push("\\cell");
@@ -95,4 +99,3 @@ function sheet_to_rtf(ws: WorkSheet, opts): string {
 	}
 	return o.join("") + "}";
 }
-

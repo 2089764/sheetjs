@@ -28,8 +28,9 @@ var WK_ = /*#__PURE__*/(function() {
 		if(!d) return d;
 		var o = opts || {};
 		if(DENSE != null && o.dense == null) o.dense = DENSE;
-		var s/*:Worksheet*/ = ((o.dense ? [] : {})/*:any*/), n = "Sheet1", next_n = "", sidx = 0;
-		var sheets = {}, snames = [], realnames = [];
+		var s/*:Worksheet*/ = ({}/*:any*/), n = "Sheet1", next_n = "", sidx = 0;
+		var sheets = {}, snames = [], realnames = [], sdata = [];
+		if(o.dense) sdata = s["!data"] = [];
 
 		var refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 		var sheetRows = o.sheetRows || 0;
@@ -74,13 +75,13 @@ var WK_ = /*#__PURE__*/(function() {
 							s["!ref"] = encode_range(refguess);
 							sheets[n] = s;
 							snames.push(n);
-							s = (o.dense ? [] : {});
+							s = ({}/*:any*/); if(o.dense) sdata = s["!data"] = [];
 							refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 							sidx = val[3]; n = next_n || "Sheet" + (sidx + 1); next_n = "";
 						}
 					}
 
-					var tmpcell = o.dense ? (s[val[0].r]||[])[val[0].c] : s[encode_cell(val[0])];
+					var tmpcell = o.dense ? (sdata[val[0].r]||[])[val[0].c] : s[encode_cell(val[0])];
 					if(tmpcell) {
 						tmpcell.t = val[1].t; tmpcell.v = val[1].v;
 						if(val[1].z != null) tmpcell.z = val[1].z;
@@ -88,8 +89,8 @@ var WK_ = /*#__PURE__*/(function() {
 						break;
 					}
 					if(o.dense) {
-						if(!s[val[0].r]) s[val[0].r] = [];
-						s[val[0].r][val[0].c] = val[1];
+						if(!sdata[val[0].r]) sdata[val[0].r] = [];
+						sdata[val[0].r][val[0].c] = val[1];
 					} else s[encode_cell(val[0])] = val[1];
 					break;
 				case 0x5405: o.works2 = true; break;
@@ -115,14 +116,14 @@ var WK_ = /*#__PURE__*/(function() {
 						s["!ref"] = encode_range(refguess);
 						sheets[n] = s;
 						snames.push(n);
-						s = (o.dense ? [] : {});
+						s = ({}/*:any*/); if(o.dense) sdata = s["!data"] = [];
 						refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 						sidx = val[3]; n = "Sheet" + (sidx + 1);
 					}
 					if(sheetRows > 0 && val[0].r >= sheetRows) break;
 					if(o.dense) {
-						if(!s[val[0].r]) s[val[0].r] = [];
-						s[val[0].r][val[0].c] = val[1];
+						if(!sdata[val[0].r]) sdata[val[0].r] = [];
+						sdata[val[0].r][val[0].c] = val[1];
 					} else s[encode_cell(val[0])] = val[1];
 					if(refguess.e.c < val[0].c) refguess.e.c = val[0].c;
 					if(refguess.e.r < val[0].r) refguess.e.r = val[0].r;
@@ -157,18 +158,17 @@ var WK_ = /*#__PURE__*/(function() {
 		if(o.type == "string") throw new Error("Cannot write WK1 to JS string");
 		var ba = buf_array();
 		var range = safe_decode_range(ws["!ref"]);
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		var cols = [];
 
 		write_biff_rec(ba, 0x00, write_BOF_WK1(0x0406));
 		write_biff_rec(ba, 0x06, write_RANGE(range));
 		var max_R = Math.min(range.e.r, 8191);
+		for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 		for(var R = range.s.r; R <= max_R; ++R) {
 			var rr = encode_row(R);
-			for(var C = range.s.c; C <= range.e.c; ++C) {
-				if(R === range.s.r) cols[C] = encode_col(C);
-				var ref = cols[C] + rr;
-				var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			for(C = range.s.c; C <= range.e.c; ++C) {
+				var cell = dense ? (ws["!data"][R]||[])[C] : ws[cols[C] + rr];
 				if(!cell || cell.t == "z") continue;
 				/* TODO: formula records */
 				if(cell.t == "n") {
@@ -200,7 +200,7 @@ var WK_ = /*#__PURE__*/(function() {
 			var ws = wb.Sheets[wb.SheetNames[i]];
 			if(!ws || !ws["!ref"]) continue;
 			var range = safe_decode_range(ws["!ref"]);
-			var dense = Array.isArray(ws);
+			var dense = ws["!data"] != null;
 			var cols = [];
 			var max_R = Math.min(range.e.r, 8191);
 			for(var R = range.s.r; R <= max_R; ++R) {
@@ -208,7 +208,7 @@ var WK_ = /*#__PURE__*/(function() {
 				for(var C = range.s.c; C <= range.e.c; ++C) {
 					if(R === range.s.r) cols[C] = encode_col(C);
 					var ref = cols[C] + rr;
-					var cell = dense ? (ws[R]||[])[C] : ws[ref];
+					var cell = dense ? (ws["!data"][R]||[])[C] : ws[ref];
 					if(!cell || cell.t == "z") continue;
 					/* TODO: FORMULA19 NUMBER18 records */
 					if(cell.t == "n") {
@@ -919,7 +919,7 @@ var WK_ = /*#__PURE__*/(function() {
 		prep_blob(d, 0);
 		var o = opts || {};
 		if(DENSE != null && o.dense == null) o.dense = DENSE;
-		var s/*:Worksheet*/ = ((o.dense ? [] : {})/*:any*/);
+		var s/*:Worksheet*/ = ({}/*:any*/); if(o.dense) s["!data"] = [];
 		var SST = [], sname = "", formulae = [];
 		var range = {s:{r:-1,c:-1}, e:{r:-1,c:-1}};
 		var cnt = 0, type = 0, C = 0, R = 0;
@@ -956,7 +956,7 @@ var WK_ = /*#__PURE__*/(function() {
 
 				case 0x0601: { /* BOS */
 					var sidx = p.read_shift(2);
-					s = ((o.dense ? [] : {})/*:any*/);
+					s = ({}/*:any*/); if(o.dense) s["!data"] = [];
 					range.s.c = p.read_shift(2);
 					range.e.c = p.read_shift(2);
 					range.s.r = p.read_shift(4);
@@ -993,6 +993,7 @@ var WK_ = /*#__PURE__*/(function() {
 					R = p.read_shift(4), cnt = p.read_shift(4);
 					if(range.s.r > R) range.s.r = R;
 					if(range.e.r < R + cnt - 1) range.e.r = R + cnt - 1;
+					var CC = encode_col(C);
 					while(p.l < p.length) {
 						var cell = { t: "z" };
 						var flags = p.read_shift(1);
@@ -1015,10 +1016,10 @@ var WK_ = /*#__PURE__*/(function() {
 							default: throw "Unsupported delta for QPW cell type " + (flags & 0x1F);
 						}
 						if(!(!o.sheetStubs && cell.t == "z")) {
-							if(Array.isArray(s)) {
-								if(!s[R]) s[R] = [];
-								s[R][C] = cell;
-							} else s[encode_cell({r:R, c:C})] = cell;
+							if(s["!data"] != null) {
+								if(!s["!data"][R]) s["!data"][R] = [];
+								s["!data"][R][C] = cell;
+							} else s[CC + encode_row(R)] = cell;
 						}
 						++R; --cnt;
 						while(mul-- > 0 && cnt >= 0) {
@@ -1034,10 +1035,10 @@ var WK_ = /*#__PURE__*/(function() {
 								default: throw "Cannot apply repeat for QPW cell type " + (flags & 0x1F);
 							}
 							if(!(!o.sheetStubs && cell.t == "z")) {
-								if(Array.isArray(s)) {
-									if(!s[R]) s[R] = [];
-									s[R][C] = cell;
-								} else s[encode_cell({r:R, c:C})] = cell;
+								if(s["!data"] != null) {
+									if(!s["!data"][R]) s["!data"][R] = [];
+									s["!data"][R][C] = cell;
+								} else s[CC + encode_row(R)] = cell;
 							}
 							++R; --cnt;
 						}

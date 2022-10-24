@@ -611,7 +611,7 @@ var SYLK = /*#__PURE__*/(function() {
 		/* TODO: codepage */
 		var preamble/*:Array<string>*/ = ["ID;PSheetJS;N;E"], o/*:Array<string>*/ = [];
 		var r = safe_decode_range(ws['!ref']), cell/*:Cell*/;
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		var RS = "\r\n";
 		var d1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 
@@ -623,10 +623,10 @@ var SYLK = /*#__PURE__*/(function() {
 		preamble.push("B;Y" + (r.e.r - r.s.r + 1) + ";X" + (r.e.c - r.s.c + 1) + ";D" + [r.s.c,r.s.r,r.e.c,r.e.r].join(" "));
 		preamble.push("O;L;D;B" + (d1904 ? ";V4" : "") + ";K47;G100 0.001");
 		for(var R = r.s.r; R <= r.e.r; ++R) {
+			if(dense && !ws["!data"][R]) continue;
 			var p = [];
 			for(var C = r.s.c; C <= r.e.c; ++C) {
-				var coord = encode_cell({r:R,c:C});
-				cell = dense ? (ws[R]||[])[C]: ws[coord];
+				cell = dense ? ws["!data"][R][C] : ws[encode_col(C) + encode_row(R)];
 				if(!cell || (cell.v == null && (!cell.f || cell.F))) continue;
 				p.push(write_ws_cell_sylk(cell, ws, R, C, opts)); // TODO: pass date1904 info
 			}
@@ -699,7 +699,7 @@ var DIF = /*#__PURE__*/(function() {
 	function sheet_to_dif(ws/*:Worksheet*//*::, opts:?any*/)/*:string*/ {
 		var _DIF_XL = DIF_XL;
 		var r = safe_decode_range(ws['!ref']);
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		var o/*:Array<string>*/ = [
 			"TABLE\r\n0,1\r\n\"sheetjs\"\r\n",
 			"VECTORS\r\n0," + (r.e.r - r.s.r + 1) + "\r\n\"\"\r\n",
@@ -707,9 +707,10 @@ var DIF = /*#__PURE__*/(function() {
 			"DATA\r\n0,0\r\n\"\"\r\n"
 		];
 		for(var R = r.s.r; R <= r.e.r; ++R) {
+			var row = dense ? ws["!data"][R] : [];
 			var p = "-1,0\r\nBOT\r\n";
 			for(var C = r.s.c; C <= r.e.c; ++C) {
-				var cell/*:Cell*/ = dense ? (ws[R] && ws[R][C]) : ws[encode_cell({r:R,c:C})];
+				var cell/*:Cell*/ = dense ? (row && row[C]) : ws[encode_cell({r:R,c:C})];
 				if(cell == null) { p +=("1,0\r\n\"\"\r\n"); continue;}
 				switch(cell.t) {
 					case 'n':
@@ -804,11 +805,11 @@ var ETH = /*#__PURE__*/(function() {
 		if(!ws || !ws['!ref']) return "";
 		var o/*:Array<string>*/ = [], oo/*:Array<string>*/ = [], cell, coord = "";
 		var r = decode_range(ws['!ref']);
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		for(var R = r.s.r; R <= r.e.r; ++R) {
 			for(var C = r.s.c; C <= r.e.c; ++C) {
 				coord = encode_cell({r:R,c:C});
-				cell = dense ? (ws[R]||[])[C] : ws[coord];
+				cell = dense ? (ws["!data"][R]||[])[C] : ws[coord];
 				if(!cell || cell.v == null || cell.t === 'z') continue;
 				oo = ["cell", coord, 't'];
 				switch(cell.t) {
@@ -930,7 +931,8 @@ var PRN = /*#__PURE__*/(function() {
 		var o = opts || {};
 		var sep = "";
 		if(DENSE != null && o.dense == null) o.dense = DENSE;
-		var ws/*:Worksheet*/ = o.dense ? ([]/*:any*/) : ({}/*:any*/);
+		var ws/*:Worksheet*/ = ({}/*:any*/);
+		if(o.dense) ws["!data"] = [];
 		var range/*:Range*/ = ({s: {c:0, r:0}, e: {c:0, r:0}}/*:any*/);
 
 		if(str.slice(0,4) == "sep=") {
@@ -976,7 +978,7 @@ var PRN = /*#__PURE__*/(function() {
 				cell.v = s;
 			}
 			if(cell.t == 'z'){}
-			else if(o.dense) { if(!ws[R]) ws[R] = []; ws[R][C] = cell; }
+			else if(o.dense) { if(!ws["!data"][R]) ws["!data"][R] = []; ws["!data"][R][C] = cell; }
 			else ws[encode_cell({c:C,r:R})] = cell;
 			start = end+1; startcc = str.charCodeAt(start);
 			if(range.e.c < C) range.e.c = C;
@@ -1032,12 +1034,12 @@ var PRN = /*#__PURE__*/(function() {
 	function sheet_to_prn(ws/*:Worksheet*//*::, opts:?any*/)/*:string*/ {
 		var o/*:Array<string>*/ = [];
 		var r = safe_decode_range(ws['!ref']), cell/*:Cell*/;
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		for(var R = r.s.r; R <= r.e.r; ++R) {
 			var oo/*:Array<string>*/ = [];
 			for(var C = r.s.c; C <= r.e.c; ++C) {
 				var coord = encode_cell({r:R,c:C});
-				cell = dense ? (ws[R]||[])[C] : ws[coord];
+				cell = dense ? (ws["!data"][R]||[])[C] : ws[coord];
 				if(!cell || cell.v == null) { oo.push("          "); continue; }
 				var w = (cell.w || (format_cell(cell), cell.w) || "").slice(0,10);
 				while(w.length < 10) w += " ";

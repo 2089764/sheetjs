@@ -54,7 +54,7 @@ if(!browser) {
 	for(var _fileAi = 0; _fileAi < _fileA.length; ++_fileAi) if(test_file(_fileA[_fileAi])) fileA.push(_fileA[_fileAi]);
 }
 
-var can_write_numbers = typeof Set !== "undefined" && typeof Array.prototype.findIndex == "function" && typeof Uint8Array !== "undefined" && typeof Uint8Array.prototype.indexOf == "function";
+var can_write_numbers = typeof Array.prototype.findIndex == "function" && typeof Uint8Array !== "undefined" && typeof Uint8Array.prototype.indexOf == "function";
 
 /* Excel enforces 31 character sheet limit, although technical file limit is 255 */
 function fixsheetname(x/*:string*/)/*:string*/ { return x.substr(0,31); }
@@ -1549,6 +1549,7 @@ describe('write features', function() {
 	it('should handle non-string values for "s" cells', function() {[
 		"xlsx", "xlsb", "xls", "biff5", "biff2", "xlml", "numbers", "ods", "fods", "wk3", "csv", "txt", "sylk", "html", "dif", "dbf", "wk1", "rtf", "prn"
 	].forEach(function(fmt) {
+		if(fmt == "numbers" && !can_write_numbers) return;
 		var ws = X.utils.aoa_to_sheet([
 			["String", "123"],
 			["Number", 123],

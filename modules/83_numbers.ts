@@ -3,10 +3,11 @@
 
 /* these are type imports and do not show up in the generated JS */
 import { CFB$Container, CFB$Entry } from 'cfb';
-import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions } from '../';
+import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions, DenseWorkSheet } from '../';
 import type { utils } from "../";
 
-declare var encode_cell: typeof utils.encode_cell;
+declare var encode_col: typeof utils.encode_col;
+declare var encode_row: typeof utils.encode_row;
 declare var encode_range: typeof utils.encode_range;
 declare var book_new: typeof utils.book_new;
 declare var book_append_sheet: typeof utils.book_append_sheet;
@@ -15,21 +16,21 @@ declare var decode_range: typeof utils.decode_range;
 import * as _CFB from 'cfb';
 declare var CFB: typeof _CFB;
 //<<import { utils } from "../../";
-//<<const { encode_cell, encode_range, book_new, book_append_sheet } = utils;
+//<<const { encode_col, encode_row, encode_range, book_new, book_append_sheet } = utils;
 
 /* see https://bugs.webkit.org/show_bug.cgi?id=243148 -- affects iOS Safari */
 declare var Buffer: any; // Buffer is typeof-guarded but TS still needs this :(
 var subarray: "subarray" | "slice" = (() => {
 	try {
-	if(typeof Uint8Array == "undefined") return "slice";
-	if(typeof Uint8Array.prototype.subarray == "undefined") return "slice";
-	// NOTE: feature tests are for node < 6.x
-	if(typeof Buffer !== "undefined") {
-		if(typeof Buffer.prototype.subarray == "undefined") return "slice";
-		if((typeof Buffer.from == "function" ? Buffer.from([72,62]) : new Buffer([72,62])) instanceof Uint8Array) return "subarray";
-		return "slice";
-	}
-	return "subarray";
+		if(typeof Uint8Array == "undefined") return "slice";
+		if(typeof Uint8Array.prototype.subarray == "undefined") return "slice";
+		// NOTE: feature tests are for node < 6.x
+		if(typeof Buffer !== "undefined") {
+			if(typeof Buffer.prototype.subarray == "undefined") return "slice";
+			if((typeof Buffer.from == "function" ? Buffer.from([72,62]) : new Buffer([72,62])) instanceof Uint8Array) return "subarray";
+			return "slice";
+		}
+		return "subarray";
 	} catch(e) { return "slice"; }
 })();
 
@@ -40,23 +41,17 @@ function u8str(u8: Uint8Array): string { return /* Buffer.isBuffer(u8) ? u8.toSt
 function stru8(str: string): Uint8Array { return typeof TextEncoder != "undefined" ? new TextEncoder().encode(str) : s2a(utf8write(str)) as Uint8Array; }
 //<<export { u8str, stru8 };
 
-function u8contains(body: Uint8Array, search: Uint8Array): boolean {
-	var L = body.indexOf(search[0]);
-	if(L == -1) return false;
-	outer: for(; L <= body.length - search.length; ++L) {
-		for(var j = 0; j < search.length; ++j) if(body[L+j] != search[j]) continue outer;
-		return true;
-	}
-	return false;
-}
-//<<export { u8contains }
-
 /** Concatenate Uint8Arrays */
 function u8concat(u8a: Uint8Array[]): Uint8Array {
-	var len = u8a.reduce((acc: number, x: Uint8Array) => acc + x.length, 0);
+	var len = 0;
+	for(var i = 0; i < u8a.length; ++i) len += u8a[i].length;
 	var out = new Uint8Array(len);
 	var off = 0;
-	u8a.forEach(u8 => { out.set(u8, off); off += u8.length; });
+	for(i = 0; i < u8a.length; ++i) {
+		var u8 = u8a[i], L = u8.length;
+		if(L < 250) { for(var j = 0; j < L; ++j) out[off++] = u8[j]; }
+		else { out.set(u8, off); off += L; }
+	}
 	return out;
 }
 //<<export { u8concat };
@@ -87,11 +82,11 @@ function writeDecimal128LE(buf: Uint8Array, offset: number, value: number): void
 }
 
 
-type Ptr = [number];
+interface Ptr { l: number; }
 
 /** Parse an integer from the varint that can be exactly stored in a double */
-function parse_varint49(buf: Uint8Array, ptr?: Ptr): number {
-	var l = ptr ? ptr[0] : 0;
+function parse_varint49(buf: Uint8Array, ptr: Ptr): number {
+	var l = ptr.l;
 	var usz = buf[l] & 0x7F;
 	varint: if(buf[l++] >= 0x80) {
 		usz |= (buf[l] & 0x7F) <<  7; if(buf[l++] < 0x80) break varint;
@@ -101,7 +96,7 @@ function parse_varint49(buf: Uint8Array, ptr?: Ptr): number {
 		usz += (buf[l] & 0x7F) * Math.pow(2, 35); ++l; if(buf[l++] < 0x80) break varint;
 		usz += (buf[l] & 0x7F) * Math.pow(2, 42); ++l; if(buf[l++] < 0x80) break varint;
 	}
-	if(ptr) ptr[0] = l;
+	ptr.l = l;
 	return usz;
 }
 /** Write a varint up to 7 bytes / 49 bits */
@@ -126,9 +121,9 @@ function write_varint49(v: number): Uint8Array {
 }
 /** Parse a repeated varint [packed = true] field */
 function parse_packed_varints(buf: Uint8Array): number[] {
-	var ptr: Ptr = [0];
+	var ptr: Ptr = {l: 0};
 	var out: number[] = [];
-	while(ptr[0] < buf.length) out.push(parse_varint49(buf, ptr));
+	while(ptr.l < buf.length) out.push(parse_varint49(buf, ptr));
 	return out;
 }
 /** Write a repeated varint [packed = true] field */
@@ -174,30 +169,31 @@ type ProtoField = Array<ProtoItem>
 type ProtoMessage = Array<ProtoField>;
 /** Shallow parse of a Protobuf message */
 function parse_shallow(buf: Uint8Array): ProtoMessage {
-	var out: ProtoMessage = [], ptr: Ptr = [0];
-	while(ptr[0] < buf.length) {
-		var off = ptr[0];
+	var out: ProtoMessage = [], ptr: Ptr = {l: 0};
+	while(ptr.l < buf.length) {
+		var off = ptr.l;
 		var num = parse_varint49(buf, ptr);
-		var type = num & 0x07; num = Math.floor(num / 8);
-		var len = 0;
-		var res: Uint8Array;
-		if(num == 0) break;
+		var type = num & 0x07; num = (num / 8)|0;
+		var data: Uint8Array;
+		var l = ptr.l;
 		switch(type) {
 			case 0: {
-				var l = ptr[0];
-				while(buf[ptr[0]++] >= 0x80);
-				res = buf[subarray](l, ptr[0]);
+				while(buf[l++] >= 0x80);
+				data = buf[subarray](ptr.l, l);
+				ptr.l = l;
 			} break;
-			case 5: len = 4; res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 1: len = 8; res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 2: len = parse_varint49(buf, ptr); res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 3: // Start group
-			case 4: // End group
+			case 1: { data = buf[subarray](l, l + 8); ptr.l = l + 8; } break;
+			case 2: {
+				var len = parse_varint49(buf, ptr);
+				data = buf[subarray](ptr.l, ptr.l + len);
+				ptr.l += len;
+			} break;
+			case 5: { data = buf[subarray](l, l + 4); ptr.l = l + 4; } break;
 			default: throw new Error(`PB Type ${type} for Field ${num} at offset ${off}`);
 		}
-		var v: ProtoItem = { data: res, type };
-		if(out[num] == null) out[num] = [v];
-		else out[num].push(v);
+		var v: ProtoItem = { data, type };
+		if(out[num] == null) out[num] = [];
+		out[num].push(v);
 	}
 	return out;
 }
@@ -235,12 +231,12 @@ interface IWAArchiveInfo {
 }
 /** Extract all messages from a IWA file */
 function parse_iwa_file(buf: Uint8Array): IWAArchiveInfo[] {
-	var out: IWAArchiveInfo[] = [], ptr: Ptr = [0];
-	while(ptr[0] < buf.length) {
+	var out: IWAArchiveInfo[] = [], ptr: Ptr = {l: 0};
+	while(ptr.l < buf.length) {
 		/* .TSP.ArchiveInfo */
 		var len = parse_varint49(buf, ptr);
-		var ai = parse_shallow(buf[subarray](ptr[0], ptr[0] + len));
-		ptr[0] += len;
+		var ai = parse_shallow(buf[subarray](ptr.l, ptr.l + len));
+		ptr.l += len;
 
 		var res: IWAArchiveInfo = {
 			/* TODO: technically ID is optional */
@@ -252,9 +248,9 @@ function parse_iwa_file(buf: Uint8Array): IWAArchiveInfo[] {
 			var fl = varint_to_i32(mi[3][0].data);
 			res.messages.push({
 				meta: mi,
-				data: buf[subarray](ptr[0], ptr[0] + fl)
+				data: buf[subarray](ptr.l, ptr.l + fl)
 			});
-			ptr[0] += fl;
+			ptr.l += fl;
 		});
 		if(ai[3]?.[0]) res.merge = (varint_to_i32(ai[3][0].data) >>> 0) > 0;
 		out.push(res);
@@ -290,35 +286,36 @@ function write_iwa_file(ias: IWAArchiveInfo[]): Uint8Array {
 /** Decompress a snappy chunk */
 function parse_snappy_chunk(type: number, buf: Uint8Array): Uint8Array[] {
 	if(type != 0) throw new Error(`Unexpected Snappy chunk type ${type}`);
-	var ptr: Ptr = [0];
+	var ptr: Ptr = {l: 0};
 
 	var usz = parse_varint49(buf, ptr);
 	var chunks: Uint8Array[] = [];
-	while(ptr[0] < buf.length) {
-		var tag = buf[ptr[0]] & 0x3;
+	var l = ptr.l;
+	while(l < buf.length) {
+		var tag = buf[l] & 0x3;
 		if(tag == 0) {
-			var len = buf[ptr[0]++] >> 2;
+			var len = buf[l++] >> 2;
 			if(len < 60) ++len;
 			else {
 				var c = len - 59;
-				len = buf[ptr[0]];
-				if(c > 1) len |= (buf[ptr[0]+1]<<8);
-				if(c > 2) len |= (buf[ptr[0]+2]<<16);
-				if(c > 3) len |= (buf[ptr[0]+3]<<24);
+				len = buf[l];
+				if(c > 1) len |= (buf[l+1]<<8);
+				if(c > 2) len |= (buf[l+2]<<16);
+				if(c > 3) len |= (buf[l+3]<<24);
 				len >>>=0; len++;
-				ptr[0] += c;
+				l += c;
 			}
-			chunks.push(buf[subarray](ptr[0], ptr[0] + len)); ptr[0] += len; continue;
+			chunks.push(buf[subarray](l, l + len)); l += len; continue;
 		} else {
 			var offset = 0, length = 0;
 			if(tag == 1) {
-				length = ((buf[ptr[0]] >> 2) & 0x7) + 4;
-				offset = (buf[ptr[0]++] & 0xE0) << 3;
-				offset |= buf[ptr[0]++];
+				length = ((buf[l] >> 2) & 0x7) + 4;
+				offset = (buf[l++] & 0xE0) << 3;
+				offset |= buf[l++];
 			} else {
-				length = (buf[ptr[0]++] >> 2) + 1;
-				if(tag == 2) { offset = buf[ptr[0]] | (buf[ptr[0]+1]<<8); ptr[0] += 2; }
-				else { offset = (buf[ptr[0]] | (buf[ptr[0]+1]<<8) | (buf[ptr[0]+2]<<16) | (buf[ptr[0]+3]<<24))>>>0; ptr[0] += 4; }
+				length = (buf[l++] >> 2) + 1;
+				if(tag == 2) { offset = buf[l] | (buf[l+1]<<8); l += 2; }
+				else { offset = (buf[l] | (buf[l+1]<<8) | (buf[l+2]<<16) | (buf[l+3]<<24))>>>0; l += 4; }
 			}
 			if(offset == 0) throw new Error("Invalid offset 0");
 			var j = chunks.length - 1, off = offset;
@@ -334,14 +331,12 @@ function parse_snappy_chunk(type: number, buf: Uint8Array): Uint8Array[] {
 				while(length >= chunks[j].length) { chunks.push(chunks[j]); length -= chunks[j].length; ++j; }
 				if(length) chunks.push(chunks[j][subarray](0, length));
 			}
-			if(chunks.length > 100) chunks = [u8concat(chunks)];
+			if(chunks.length > 25) chunks = [u8concat(chunks)];
 		}
 	}
-	if(chunks.reduce((acc, u8) => acc + u8.length, 0) != usz) throw new Error(`Unexpected length: ${chunks.reduce((acc, u8) => acc + u8.length, 0)} != ${usz}`);
+	var clen = 0; for(var u8i = 0; u8i < chunks.length; ++u8i) clen += chunks[u8i].length;
+	if(clen != usz) throw new Error(`Unexpected length: ${clen} != ${usz}`);
 	return chunks;
-	//var o = u8concat(chunks);
-	//if(o.length != usz) throw new Error(`Unexpected length: ${o.length} != ${usz}`);
-	//return o;
 }
 
 /** Decompress IWA file */
@@ -356,7 +351,7 @@ function decompress_iwa_file(buf: Uint8Array): Uint8Array {
 		l += len;
 	}
 	if(l !== buf.length) throw new Error("data is not a valid framed stream!");
-	return u8concat(out);
+	return out.length == 1 ? out[0] : u8concat(out);
 }
 
 /** Compress IWA file */
@@ -404,11 +399,11 @@ function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: P
 	var ctype = t & 0xFF, ver = t >> 8;
 	var fmt = ver >= 5 ? nfmt : ofmt;
 	dur: if((flags & (ver > 4 ? 8: 4)) && cell.t == "n" && ctype == 7) {
-		var dstyle =   (fmt[7]?.[0])  ? parse_varint49(fmt[7][0].data)  : -1;
+		var dstyle =   (fmt[7]?.[0])  ? varint_to_i32(fmt[7][0].data)  : -1;
 		if(dstyle == -1) break dur;
-		var dmin =     (fmt[15]?.[0]) ? parse_varint49(fmt[15][0].data) : -1;
-		var dmax =     (fmt[16]?.[0]) ? parse_varint49(fmt[16][0].data) : -1;
-		var auto =     (fmt[40]?.[0]) ? parse_varint49(fmt[40][0].data) : -1;
+		var dmin =     (fmt[15]?.[0]) ? varint_to_i32(fmt[15][0].data) : -1;
+		var dmax =     (fmt[16]?.[0]) ? varint_to_i32(fmt[16][0].data) : -1;
+		var auto =     (fmt[40]?.[0]) ? varint_to_i32(fmt[40][0].data) : -1;
 		var d: number = cell.v as number, dd = d;
 		autodur: if(auto) { // TODO: check if numbers reformats on load
 			if(d == 0) { dmin = dmax = 2; break autodur; }
@@ -617,7 +612,7 @@ function parse_cell_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 /** Parse .TSP.Reference */
 function parse_TSP_Reference(buf: Uint8Array): number {
 	var pb = parse_shallow(buf);
-	return parse_varint49(pb[1][0].data);
+	return varint_to_i32(pb[1][0].data);
 }
 /** Write .TSP.Reference */
 function write_TSP_Reference(idx: number): Uint8Array {
@@ -751,7 +746,7 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 	range.e.c = (varint_to_i32(pb[7][0].data) >>> 0) - 1;
 	if(range.e.c < 0) throw new Error(`Invalid col varint ${pb[7][0].data}`);
 	ws["!ref"] = encode_range(range);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null, dws = (ws as DenseWorkSheet);
 	// .TST.DataStore
 	var store = parse_shallow(pb[4][0].data);
 	var lut: DataLUT = numbers_lut_new();
@@ -776,11 +771,10 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 				var res = parse_cell_storage(buf, lut);
 				if(res) {
 					if(dense) {
-						if(!ws[_R + R]) ws[_R + R] = [];
-						ws[_R + R][C] = res;
+						if(!dws["!data"][_R + R]) dws["!data"][_R + R] = [];
+						dws["!data"][_R + R][C] = res;
 					} else {
-						var addr = encode_cell({r:_R + R,c:C});
-						ws[addr] = res;
+						ws[encode_col(C) + encode_row(_R + R)] = res;
 					}
 				}
 			});
@@ -810,10 +804,8 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 function parse_TST_TableInfoArchive(M: MessageSpace, root: IWAMessage, opts?: ParsingOptions): WorkSheet {
 	var pb = parse_shallow(root.data);
 	// ESBuild #2375
-	var out: WorkSheet;
-	if(!opts?.dense) out =  ({ "!ref": "A1" });
-	else out = ([] as any);
-	out["!ref"] = "A1";
+	var out: WorkSheet = { "!ref": "A1" };
+	if(opts?.dense) (out as DenseWorkSheet)["!data"] = [];
 	var tableref = M[parse_TSP_Reference(pb[2][0].data)];
 	var mtype = varint_to_i32(tableref[0].meta[1][0].data);
 	if(mtype != 6001) throw new Error(`6000 unexpected reference to ${mtype}`);
@@ -1026,21 +1018,18 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 		});
 	});
 
-	/* precompute a varint for each id */
-	indices.sort((x,y) => x-y);
-	var indices_varint: Array<[number, Uint8Array]> = indices.filter(x => x > 1).map(x => [x, write_varint49(x)] );
-
 	/* build dependent tree */
 	cfb.FileIndex.forEach(fi => {
 		if(!fi.name.match(/\.iwa/)) return;
 		if(fi.name.match(/OperationStorage/)) return;
 		parse_iwa_file(decompress_iwa_file(fi.content as Uint8Array)).forEach(ia => {
-			// this is a huge hack based on the observation that most messages of interest have id > 900000
-			// TODO: use the actual references
-			indices_varint.forEach(ivi => {
-				if(ia.messages.some(mess => varint_to_i32(mess.meta[1][0].data) != 11006 && u8contains(mess.data, ivi[1]))) {
-					dependents[ivi[0]].deps.push(ia.id);
-				}
+			ia.messages.forEach(mess => {
+				[5,6].forEach(f => {
+					if(!mess.meta[f]) return;
+					mess.meta[f].forEach(x => {
+						dependents[ia.id].deps.push(varint_to_i32(x.data));
+					})
+				});
 			});
 		});
 	});
@@ -1298,7 +1287,7 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 							[],
 							[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
 						])});
-						mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, parse_varint49(mlist[1][0].data) ))}];
+						mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 						/* add reference from TableModelArchive file to Tile */
 						var parentidx = mlist[3].findIndex(m => {
@@ -1363,7 +1352,7 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 								[],
 								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
 							])});
-							mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, parse_varint49(mlist[1][0].data) ))}];
+							mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 							/* add reference from TableModelArchive file to Tile */
 							var parentidx = mlist[3].findIndex(m => {
@@ -1427,7 +1416,7 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 								[],
 								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
 							])});
-							mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileref + 1, parse_varint49(mlist[1][0].data) ))}];
+							mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileref + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 							/* add reference from TableModelArchive file to Tile */
 							var parentidx = mlist[3].findIndex(m => {
@@ -1565,8 +1554,8 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var metadata = numbers_iwa_find(cfb, deps, 2);
 					var mlist = parse_shallow(metadata.messages[0].data);
 					/* .TSP.ComponentInfo field 1 is the id, field 12 is the save token */
-					var mlst = mlist[3].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) == tileref);
-					return (mlst?.length) ? parse_varint49(parse_shallow(mlst[0].data)[12][0].data) : 0;
+					var mlst = mlist[3].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) == tileref);
+					return (mlst?.length) ? varint_to_i32(parse_shallow(mlst[0].data)[12][0].data) : 0;
 				})();
 
 				/* remove existing tile */
@@ -1577,7 +1566,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					numbers_iwa_doit(cfb, deps, 2, (ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
 
-						mlist[3] = mlist[3].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) != tileref);
+						mlist[3] = mlist[3].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != tileref);
 
 						/* remove reference from TableModelArchive file to Tile */
 						var parentidx = mlist[3].findIndex(m => {
@@ -1588,7 +1577,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 						});
 						var parent = parse_shallow(mlist[3][parentidx].data);
 						if(!parent[6]) parent[6] = [];
-						parent[6] = parent[6].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) != tileref);
+						parent[6] = parent[6].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != tileref);
 						mlist[3][parentidx].data = write_shallow(parent);
 
 						ai.messages[0].data = write_shallow(mlist);
@@ -1660,7 +1649,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 							[],
 							[{type: 0, data: write_varint49(save_token)}],
 						])});
-						mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileid + 1, parse_varint49(mlist[1][0].data) ))}];
+						mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileid + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 						/* add reference from TableModelArchive file to Tile */
 						var parentidx = mlist[3].findIndex(m => {

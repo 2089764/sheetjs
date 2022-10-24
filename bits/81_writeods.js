@@ -211,7 +211,7 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 		o.push('      <table:table table:name="' + escapexml(wb.SheetNames[i]) + '" table:style-name="ta1">\n');
 		var R=0,C=0, range = decode_range(ws['!ref']||"A1");
 		var marr/*:Array<Range>*/ = ws['!merges'] || [], mi = 0;
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		if(ws["!cols"]) {
 			for(C = 0; C <= range.e.c; ++C) o.push('        <table:table-column' + (ws["!cols"][C] ? ' table:style-name="co' + ws["!cols"][C].ods + '"' : '') + '></table:table-column>\n');
 		}
@@ -237,7 +237,7 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 					break;
 				}
 				if(skip) { o.push(covered_cell_xml); continue; }
-				var ref = encode_cell({r:R, c:C}), cell = dense ? (ws[R]||[])[C]: ws[ref];
+				var ref = encode_cell({r:R, c:C}), cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 				if(cell && cell.f) {
 					ct['table:formula'] = escapexml(csf_to_ods_formula(cell.f));
 					if(cell.F) {
@@ -347,9 +347,10 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 		var nfi = 69;
 		wb.SheetNames.map(function(n) { return wb.Sheets[n]; }).forEach(function(ws) {
 			if(!ws) return;
+			var dense = (ws["!data"] != null);
 			var range = decode_range(ws["!ref"]);
 			for(var R = 0; R <= range.e.r; ++R) for(var C = 0; C <= range.e.c; ++C) {
-				var c = Array.isArray(ws) ? (ws[R]||[])[C] : ws[encode_cell({r:R,c:C})];
+				var c = dense ? (ws["!data"][R]||[])[C] : ws[encode_cell({r:R,c:C})];
 				if(!c || !c.z || c.z.toLowerCase() == "general") continue;
 				if(!nfs[c.z]) {
 					var out = write_number_format_ods(c.z, "N" + nfi);

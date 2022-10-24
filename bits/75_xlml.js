@@ -207,7 +207,7 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 	var Rn;
 	var state = [], tmp;
 	if(DENSE != null && opts.dense == null) opts.dense = DENSE;
-	var sheets = {}, sheetnames/*:Array<string>*/ = [], cursheet/*:Worksheet*/ = (opts.dense ? [] : {}), sheetname = "";
+	var sheets = {}, sheetnames/*:Array<string>*/ = [], cursheet/*:Worksheet*/ = ({}), sheetname = ""; if(opts.dense) cursheet["!data"] = [];
 	var cell = ({}/*:any*/), row = {};// eslint-disable-line no-unused-vars
 	var dtag = xlml_parsexmltag('<Data ss:Type="String">'), didx = 0;
 	var c = 0, r = 0;
@@ -240,8 +240,8 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 				if(comments.length > 0) cell.c = comments;
 				if((!opts.sheetRows || opts.sheetRows > r) && cell.v !== void 0) {
 					if(opts.dense) {
-						if(!cursheet[r]) cursheet[r] = [];
-						cursheet[r][c] = cell;
+						if(!cursheet["!data"][r]) cursheet["!data"][r] = [];
+						cursheet["!data"][r][c] = cell;
 					} else cursheet[encode_col(c) + encode_row(r)] = cell;
 				}
 				if(cell.HRef) {
@@ -261,8 +261,8 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 						for(var cmd = r; cmd <= rr; ++cmd) {
 							if(cma > c || cmd > r) {
 								if(opts.dense) {
-									if(!cursheet[cmd]) cursheet[cmd] = [];
-									cursheet[cmd][cma] = {t:'z'};
+									if(!cursheet["!data"][cmd]) cursheet["!data"][cmd] = [];
+									cursheet["!data"][cmd][cma] = {t:'z'};
 								} else cursheet[encode_col(cma) + encode_row(cmd)] = {t:'z'};
 							}
 						}
@@ -321,7 +321,7 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 				state.push([Rn[3], false]);
 				tmp = xlml_parsexmltag(Rn[0]);
 				sheetname = unescapexml(tmp.Name);
-				cursheet = (opts.dense ? [] : {});
+				cursheet = ({}); if(opts.dense) cursheet["!data"] = [];
 				merges = [];
 				arrayf = [];
 				rowinfo = [];
@@ -1177,7 +1177,7 @@ function write_ws_xlml_table(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbo
 		if(n.hidden) k['ss:Hidden']="1";
 		o.push(writextag("Column",null,k));
 	});
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	for(var R = range.s.r; R <= range.e.r; ++R) {
 		var row = [write_ws_xlml_row(R, (ws['!rows']||[])[R])];
 		for(var C = range.s.c; C <= range.e.c; ++C) {
@@ -1192,7 +1192,7 @@ function write_ws_xlml_table(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbo
 			}
 			if(skip) continue;
 			var addr = {r:R,c:C};
-			var ref = encode_cell(addr), cell = dense ? (ws[R]||[])[C] : ws[ref];
+			var ref = encode_col(C) + encode_row(R), cell = dense ? (ws["!data"][R]||[])[C] : ws[ref];
 			row.push(write_ws_xlml_cell(cell, ref, ws, opts, idx, wb, addr));
 		}
 		row.push("</Row>");

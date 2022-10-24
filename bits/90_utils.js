@@ -4,17 +4,17 @@ type MJRObject = {
 	isempty: boolean;
 };
 */
-function make_json_row(sheet/*:Worksheet*/, r/*:Range*/, R/*:number*/, cols/*:Array<string>*/, header/*:number*/, hdr/*:Array<any>*/, dense/*:boolean*/, o/*:Sheet2JSONOpts*/)/*:MJRObject*/ {
+function make_json_row(sheet/*:Worksheet*/, r/*:Range*/, R/*:number*/, cols/*:Array<string>*/, header/*:number*/, hdr/*:Array<any>*/, o/*:Sheet2JSONOpts*/)/*:MJRObject*/ {
 	var rr = encode_row(R);
 	var defval = o.defval, raw = o.raw || !Object.prototype.hasOwnProperty.call(o, "raw");
-	var isempty = true;
+	var isempty = true, dense = (sheet["!data"] != null);
 	var row/*:any*/ = (header === 1) ? [] : {};
 	if(header !== 1) {
 		if(Object.defineProperty) try { Object.defineProperty(row, '__rowNum__', {value:R, enumerable:false}); } catch(e) { row.__rowNum__ = R; }
 		else row.__rowNum__ = R;
 	}
-	if(!dense || sheet[R]) for (var C = r.s.c; C <= r.e.c; ++C) {
-		var val = dense ? sheet[R][C] : sheet[cols[C] + rr];
+	if(!dense || sheet["!data"][R]) for (var C = r.s.c; C <= r.e.c; ++C) {
+		var val = dense ? (sheet["!data"][R]||[])[C] : sheet[cols[C] + rr];
 		if(val === undefined || val.t === undefined) {
 			if(defval === undefined) continue;
 			if(hdr[C] != null) { row[hdr[C]] = defval; }
@@ -63,16 +63,16 @@ function sheet_to_json(sheet/*:Worksheet*/, opts/*:?Sheet2JSONOpts*/) {
 	var cols/*:Array<string>*/ = [];
 	var out/*:Array<any>*/ = [];
 	var outi = 0, counter = 0;
-	var dense = Array.isArray(sheet);
+	var dense = sheet["!data"] != null;
 	var R = r.s.r, C = 0;
 	var header_cnt = {};
-	if(dense && !sheet[R]) sheet[R] = [];
+	if(dense && !sheet["!data"][R]) sheet["!data"][R] = [];
 	var colinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!cols"] || [];
 	var rowinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!rows"] || [];
 	for(C = r.s.c; C <= r.e.c; ++C) {
 		if(((colinfo[C]||{}).hidden)) continue;
 		cols[C] = encode_col(C);
-		val = dense ? sheet[R][C] : sheet[cols[C] + rr];
+		val = dense ? sheet["!data"][R][C] : sheet[cols[C] + rr];
 		switch(header) {
 			case 1: hdr[C] = C - r.s.c; break;
 			case 2: hdr[C] = cols[C]; break;
@@ -91,7 +91,7 @@ function sheet_to_json(sheet/*:Worksheet*/, opts/*:?Sheet2JSONOpts*/) {
 	}
 	for (R = r.s.r + offset; R <= r.e.r; ++R) {
 		if ((rowinfo[R]||{}).hidden) continue;
-		var row = make_json_row(sheet, r, R, cols, header, hdr, dense, o);
+		var row = make_json_row(sheet, r, R, cols, header, hdr, o);
 		if((row.isempty === false) || (header === 1 ? o.blankrows !== false : !!o.blankrows)) out[outi++] = row.row;
 	}
 	out.length = outi;
@@ -102,9 +102,11 @@ var qreg = /"/g;
 function make_csv_row(sheet/*:Worksheet*/, r/*:Range*/, R/*:number*/, cols/*:Array<string>*/, fs/*:number*/, rs/*:number*/, FS/*:string*/, o/*:Sheet2CSVOpts*/)/*:?string*/ {
 	var isempty = true;
 	var row/*:Array<string>*/ = [], txt = "", rr = encode_row(R);
+	var dense = sheet["!data"] != null;
+	var datarow = dense && sheet["!data"][R] || [];
 	for(var C = r.s.c; C <= r.e.c; ++C) {
 		if (!cols[C]) continue;
-		var val = o.dense ? (sheet[R]||[])[C]: sheet[cols[C] + rr];
+		var val = dense ? datarow[C]: sheet[cols[C] + rr];
 		if(val == null) txt = "";
 		else if(val.v != null) {
 			isempty = false;
@@ -131,7 +133,6 @@ function sheet_to_csv(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/)/*:string*/ {
 	var RS = o.RS !== undefined ? o.RS : "\n", rs = RS.charCodeAt(0);
 	var endregex = new RegExp((FS=="|" ? "\\|" : FS)+"+$");
 	var row = "", cols/*:Array<string>*/ = [];
-	o.dense = Array.isArray(sheet);
 	var colinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!cols"] || [];
 	var rowinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!rows"] || [];
 	for(var C = r.s.c; C <= r.e.c; ++C) if (!((colinfo[C]||{}).hidden)) cols[C] = encode_col(C);
@@ -143,7 +144,6 @@ function sheet_to_csv(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/)/*:string*/ {
 		if(o.strip) row = row.replace(endregex,"");
 		if(row || (o.blankrows !== false)) out.push((w++ ? RS : "") + row);
 	}
-	delete o.dense;
 	return out.join("");
 }
 
@@ -160,13 +160,13 @@ function sheet_to_formulae(sheet/*:Worksheet*/)/*:Array<string>*/ {
 	if(sheet == null || sheet["!ref"] == null) return [];
 	var r = safe_decode_range(sheet['!ref']), rr = "", cols/*:Array<string>*/ = [], C;
 	var cmds/*:Array<string>*/ = [];
-	var dense = Array.isArray(sheet);
+	var dense = sheet["!data"] != null;
 	for(C = r.s.c; C <= r.e.c; ++C) cols[C] = encode_col(C);
 	for(var R = r.s.r; R <= r.e.r; ++R) {
 		rr = encode_row(R);
 		for(C = r.s.c; C <= r.e.c; ++C) {
 			y = cols[C] + rr;
-			x = dense ? (sheet[R]||[])[C] : sheet[y];
+			x = dense ? (sheet["!data"][R]||[])[C] : sheet[y];
 			val = "";
 			if(x === undefined) continue;
 			else if(x.F != null) {
@@ -191,10 +191,11 @@ function sheet_to_formulae(sheet/*:Worksheet*/)/*:Array<string>*/ {
 
 function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet*/ {
 	var o = opts || {};
-	var dense = _ws ? Array.isArray(_ws) : o.dense;
+	var dense = _ws ? (_ws["!data"] != null) : o.dense;
 	if(DENSE != null && dense == null) dense = DENSE;
 	var offset = +!o.skipHeader;
-	var ws/*:Worksheet*/ = _ws || (dense ? ([]/*:any*/) : ({}/*:any*/));
+	var ws/*:Worksheet*/ = _ws || ({});
+	if(!_ws && dense) ws["!data"] = [];
 	var _R = 0, _C = 0;
 	if(ws && o.origin != null) {
 		if(typeof o.origin == 'number') _R = o.origin;
@@ -215,17 +216,18 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 	var hdr/*:Array<string>*/ = o.header || [], C = 0;
 	var ROW = [];
 	js.forEach(function (JS, R/*:number*/) {
-		if(dense && !ws[_R + R + offset]) ws[_R + R + offset] = [];
-		if(dense) ROW = ws[_R + R + offset];
+		if(dense && !ws["!data"][_R + R + offset]) ws["!data"][_R + R + offset] = [];
+		if(dense) ROW = ws["!data"][_R + R + offset];
 		keys(JS).forEach(function(k) {
 			if((C=hdr.indexOf(k)) == -1) hdr[C=hdr.length] = k;
 			var v = JS[k];
 			var t = 'z';
 			var z = "";
-			var ref = dense ? "" : encode_cell({c:_C + C,r:_R + R + offset});
+			var ref = dense ? "" : (encode_col(_C + C) + encode_row(_R + R + offset));
 			var cell/*:Cell*/ = dense ? ROW[_C + C] : ws[ref];
 			if(v && typeof v === 'object' && !(v instanceof Date)){
-				ws[ref] = v;
+				if(dense) ROW[_C + C] = v;
+				else ws[ref] = v;
 			} else {
 				if(typeof v == 'number') t = 'n';
 				else if(typeof v == 'boolean') t = 'b';
@@ -250,9 +252,9 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 	});
 	range.e.c = Math.max(range.e.c, _C + hdr.length - 1);
 	var __R = encode_row(_R);
-	if(dense && !ws[_R]) ws[_R] = [];
+	if(dense && !ws["!data"][_R]) ws["!data"][_R] = [];
 	if(offset) for(C = 0; C < hdr.length; ++C) {
-		if(dense) ws[_R][C + _C] = {t:'s', v:hdr[C]};
+		if(dense) ws["!data"][_R][C + _C] = {t:'s', v:hdr[C]};
 		else ws[encode_col(C + _C) + __R] = {t:'s', v:hdr[C]};
 	}
 	ws['!ref'] = encode_range(range);
@@ -264,18 +266,17 @@ function json_to_sheet(js/*:Array<any>*/, opts)/*:Worksheet*/ { return sheet_add
 function ws_get_cell_stub(ws/*:Worksheet*/, R, C/*:?number*/)/*:Cell*/ {
 	/* A1 cell address */
 	if(typeof R == "string") {
-		/* dense */
-		if(Array.isArray(ws)) {
+		if(ws["!data"] != null) {
 			var RC = decode_cell(R);
-			if(!ws[RC.r]) ws[RC.r] = [];
-			return ws[RC.r][RC.c] || (ws[RC.r][RC.c] = {t:'z'});
+			if(!ws["!data"][RC.r]) ws["!data"][RC.r] = [];
+			return ws["!data"][RC.r][RC.c] || (ws["!data"][RC.r][RC.c] = {t:'z'});
 		}
 		return ws[R] || (ws[R] = {t:'z'});
 	}
 	/* cell address object */
 	if(typeof R != "number") return ws_get_cell_stub(ws, encode_cell(R));
 	/* R and C are 0-based indices */
-	return ws_get_cell_stub(ws, encode_cell({r:R,c:C||0}));
+	return ws_get_cell_stub(ws, encode_col(C||0) + encode_row(R));
 }
 
 /* find sheet index for given name / validate index */

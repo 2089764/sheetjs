@@ -536,20 +536,52 @@ export type SheetKeys = string | MarginInfo | SheetType;
 /** General object representing a Sheet (worksheet or chartsheet) */
 export interface Sheet {
     /**
-     * Indexing with a cell address string maps to a cell object
+     * Sparse-mode store cells with keys corresponding to A1-style address
+     * Dense-mode  store cells in the '!data' key
      * Special keys start with '!'
      */
-    [cell: string]: CellObject | SheetKeys | any;
+    [cell: string]: CellObject | CellObject[][] | SheetKeys | any;
+
+    /**
+     * Dense-mode worksheets store data in an array of arrays
+     *
+     * Cells are accessed with sheet['!data'][R][C] (where R and C are 0-indexed)
+     */
+    '!data'?: CellObject[][];
 
     /** Sheet type */
     '!type'?: SheetType;
 
-    /** Sheet Range */
+    /** Sheet Range (A1-style) */
     '!ref'?: string;
 
     /** Page Margins */
     '!margins'?: MarginInfo;
 }
+/** General object representing a dense Sheet (worksheet or chartsheet) */
+export interface DenseSheet extends Sheet {
+    /**
+     * Special keys start with '!'
+     * Dense-mode worksheets store data in the '!data' key
+     */
+    [cell: string]: CellObject[][] | SheetKeys;
+
+    /**
+     * Dense-mode worksheets store data in an array of arrays
+     *
+     * Cells are accessed with sheet['!data'][R][C] (where R and C are 0-indexed)
+     */
+    '!data': CellObject[][];
+}
+/** General object representing a sparse Sheet (worksheet or chartsheet) */
+export interface SparseSheet extends Sheet {
+    /**
+     * Sparse-mode store cells with keys corresponding to A1-style address
+     * Cells are accessed with sheet[addr]
+     */
+    '!data': never;
+}
+
 
 /** AutoFilter properties */
 export interface AutoFilterInfo {
@@ -581,6 +613,15 @@ export interface WorkSheet extends Sheet {
 
     /** AutoFilter info */
     '!autofilter'?: AutoFilterInfo;
+}
+/** Dense Worksheet Object */
+export interface DenseWorkSheet extends DenseSheet {
+    /**
+     * Dense-mode worksheets store data in an array of arrays
+     *
+     * Cells are accessed with sheet['!data'][R][C] (where R and C are 0-indexed)
+     */
+    '!data': CellObject[][];
 }
 
 /**

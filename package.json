@@ -1,6 +1,6 @@
 {
 	"name": "xlsx",
-	"version": "0.18.12",
+	"version": "0.19.0",
 	"author": "sheetjs",
 	"description": "SheetJS Spreadsheet data parser and writer",
 	"keywords": [
@@ -109,7 +109,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git://github.com/SheetJS/sheetjs.git"
+		"url": "https://git.sheetjs.com/SheetJS/sheetjs"
 	},
 	"scripts": {
 		"pretest": "npm run lint",
@@ -138,7 +138,7 @@
 	},
 	"homepage": "https://sheetjs.com/",
 	"bugs": {
-		"url": "https://github.com/SheetJS/sheetjs/issues"
+		"url": "https://git.sheetjs.com/SheetJS/sheetjs/issues"
 	},
 	"license": "Apache-2.0",
 	"engines": {
