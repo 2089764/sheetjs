@@ -1039,7 +1039,7 @@ function parse_numbers_iwa(cfb, opts) {
   cfb.FileIndex.forEach(function(s) {
     if (!s.name.match(/\.iwa$/))
       return;
-    if (s.content[0] == 98)
+    if (s.content[0] != 0)
       return;
     var o;
     try {
@@ -1191,7 +1191,7 @@ function build_numbers_deps(cfb) {
       return;
     if (!fi.name.match(/\.iwa/))
       return;
-    if (fi.name.match(/OperationStorage/))
+    if (fi.content[0] != 0)
       return;
     parse_iwa_file(decompress_iwa_file(fi.content)).forEach(function(packet) {
       indices.push(packet.id);
@@ -1201,7 +1201,7 @@ function build_numbers_deps(cfb) {
   cfb.FileIndex.forEach(function(fi) {
     if (!fi.name.match(/\.iwa/))
       return;
-    if (fi.name.match(/OperationStorage/))
+    if (fi.content[0] != 0)
       return;
     parse_iwa_file(decompress_iwa_file(fi.content)).forEach(function(ia) {
       ia.messages.forEach(function(mess) {

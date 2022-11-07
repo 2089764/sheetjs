@@ -165,7 +165,7 @@ interface ProtoItem {
 	data: Uint8Array;
 	type: number;
 }
-type ProtoField = Array<ProtoItem>
+type ProtoField = Array<ProtoItem>;
 type ProtoMessage = Array<ProtoField>;
 /** Shallow parse of a Protobuf message */
 function parse_shallow(buf: Uint8Array): ProtoMessage {
@@ -397,6 +397,7 @@ var numbers_lut_new = (): DataLUT => ({ sst: [], rsst: [], ofmt: [], nfmt: [] })
 
 function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: ProtoMessage, nfmt: ProtoMessage): void {
 	var ctype = t & 0xFF, ver = t >> 8;
+	/* .TSK.FormatStructArchive */
 	var fmt = ver >= 5 ? nfmt : ofmt;
 	dur: if((flags & (ver > 4 ? 8: 4)) && cell.t == "n" && ctype == 7) {
 		var dstyle =   (fmt[7]?.[0])  ? varint_to_i32(fmt[7][0].data)  : -1;
@@ -871,7 +872,7 @@ function parse_numbers_iwa(cfb: CFB$Container, opts?: ParsingOptions ): WorkBook
 	/* collect entire message space */
 	cfb.FileIndex.forEach(s => {
 		if(!s.name.match(/\.iwa$/)) return;
-		if(s.content[0] == 98) return; // TODO: OperationStorage.iwa
+		if(s.content[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 		var o: Uint8Array;
 		try { o = decompress_iwa_file(s.content as Uint8Array); } catch(e) { return console.log("?? " + s.content.length + " " + (e.message || e)); }
 		var packets: IWAArchiveInfo[];
@@ -1010,7 +1011,7 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 		var fi = row[0], fp = row[1];
 		if(fi.type != 2) return;
 		if(!fi.name.match(/\.iwa/)) return;
-		if(fi.name.match(/OperationStorage/)) return;
+		if((fi.content as Uint8Array)[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 
 		parse_iwa_file(decompress_iwa_file(fi.content as Uint8Array)).forEach(packet => {
 			indices.push(packet.id);
@@ -1021,14 +1022,14 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 	/* build dependent tree */
 	cfb.FileIndex.forEach(fi => {
 		if(!fi.name.match(/\.iwa/)) return;
-		if(fi.name.match(/OperationStorage/)) return;
+		if((fi.content as Uint8Array)[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 		parse_iwa_file(decompress_iwa_file(fi.content as Uint8Array)).forEach(ia => {
 			ia.messages.forEach(mess => {
 				[5,6].forEach(f => {
 					if(!mess.meta[f]) return;
 					mess.meta[f].forEach(x => {
 						dependents[ia.id].deps.push(varint_to_i32(x.data));
-					})
+					});
 				});
 			});
 		});
