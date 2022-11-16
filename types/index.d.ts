@@ -564,7 +564,7 @@ export interface DenseSheet extends Sheet {
      * Special keys start with '!'
      * Dense-mode worksheets store data in the '!data' key
      */
-    [cell: string]: CellObject[][] | SheetKeys;
+    [cell: string]: CellObject[][] | SheetKeys | any;
 
     /**
      * Dense-mode worksheets store data in an array of arrays
