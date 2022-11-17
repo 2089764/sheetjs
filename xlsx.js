@@ -4,7 +4,7 @@
 /*global global, exports, module, require:false, process:false, Buffer:false, ArrayBuffer:false, DataView:false, Deno:false */
 var XLSX = {};
 function make_xlsx_lib(XLSX){
-XLSX.version = '0.19.0';
+XLSX.version = '0.19.1';
 var current_codepage = 1200, current_ansi = 1252;
 /*global cptable:true, window */
 var $cptable;
@@ -15203,7 +15203,7 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	var ridx = (data1.match(/<(?:\w*:)?dimension/)||{index:-1}).index;
 	if(ridx > 0) {
 		var ref = data1.slice(ridx,ridx+50).match(dimregex);
-		if(ref) parse_ws_xml_dim(s, ref[1]);
+		if(ref && !(opts && opts.nodim)) parse_ws_xml_dim(s, ref[1]);
 	}
 
 	/* 18.3.1.88 sheetViews CT_SheetViews */
@@ -15239,6 +15239,7 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
 
+	if(opts && opts.nodim) refguess.s.c = refguess.s.r = 0;
 	if(!s["!ref"] && refguess.e.c >= refguess.s.c && refguess.e.r >= refguess.s.r) s["!ref"] = encode_range(refguess);
 	if(opts.sheetRows > 0 && s["!ref"]) {
 		var tmpref = safe_decode_range(s["!ref"]);
@@ -15516,8 +15517,10 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 		tag = parsexmltag(x.slice(rstarti,ri), true);
 		tagr = tag.r != null ? parseInt(tag.r, 10) : tagr+1; tagc = -1;
 		if(opts.sheetRows && opts.sheetRows < tagr) continue;
-		if(guess.s.r > tagr - 1) guess.s.r = tagr - 1;
-		if(guess.e.r < tagr - 1) guess.e.r = tagr - 1;
+		if(!opts.nodim) {
+			if(guess.s.r > tagr - 1) guess.s.r = tagr - 1;
+			if(guess.e.r < tagr - 1) guess.e.r = tagr - 1;
+		}
 
 		if(opts && opts.cellStyles) {
 			rowobj = {}; rowrite = false;
@@ -15648,8 +15651,14 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];
 				if(cm && cm.type == 'XLDAPR') p.D = true;
 			}
+			var _r;
+			if(opts.nodim) {
+				_r = decode_cell(tag.r);
+				if(guess.s.r > _r.r) guess.s.r = _r.r;
+				if(guess.e.r < _r.r) guess.e.r = _r.r;
+			}
 			if(dense) {
-				var _r = decode_cell(tag.r);
+				_r = decode_cell(tag.r);
 				if(!s["!data"][_r.r]) s["!data"][_r.r] = [];
 				s["!data"][_r.r][_r.c] = p;
 			} else s[tag.r] = p;
@@ -24065,7 +24074,7 @@ function parse_numbers_iwa(cfb, opts) {
   cfb.FileIndex.forEach(function(s) {
     if (!s.name.match(/\.iwa$/))
       return;
-    if (s.content[0] == 98)
+    if (s.content[0] != 0)
       return;
     var o;
     try {
@@ -24217,7 +24226,7 @@ function build_numbers_deps(cfb) {
       return;
     if (!fi.name.match(/\.iwa/))
       return;
-    if (fi.name.match(/OperationStorage/))
+    if (fi.content[0] != 0)
       return;
     parse_iwa_file(decompress_iwa_file(fi.content)).forEach(function(packet) {
       indices.push(packet.id);
@@ -24227,7 +24236,7 @@ function build_numbers_deps(cfb) {
   cfb.FileIndex.forEach(function(fi) {
     if (!fi.name.match(/\.iwa/))
       return;
-    if (fi.name.match(/OperationStorage/))
+    if (fi.content[0] != 0)
       return;
     parse_iwa_file(decompress_iwa_file(fi.content)).forEach(function(ia) {
       ia.messages.forEach(function(mess) {

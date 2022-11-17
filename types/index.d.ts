@@ -221,6 +221,9 @@ export interface ParsingOptions extends CommonOptions {
     /** If true, plaintext parsing will not parse values */
     raw?: boolean;
 
+    /** If true, ignore "dimensions" records and guess range using every cell */
+    nodim?: boolean;
+
     /** If true, preserve _xlfn. prefixes in formula function names */
     xlfn?: boolean;
 

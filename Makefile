@@ -153,11 +153,11 @@ test-bun: testbun.mjs ## Run Bun test suite
 
 .PHONY: test-deno
 test-deno: test.ts ## Run Deno test suite
-	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
+	deno test --check --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
 
 .PHONY: test-denocp
 test-denocp: testnocp.ts ## Run Deno test suite (without codepage)
-	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
+	deno test --check --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
 
 TESTFMT=$(patsubst %,test_%,$(FMT))
 .PHONY: $(TESTFMT)
