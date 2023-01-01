@@ -803,15 +803,13 @@ export interface AOA2SheetOpts extends CommonOptions, DateNFOption {
 
 export interface SheetAOAOpts extends AOA2SheetOpts, OriginOption {}
 
-export interface JSON2SheetOpts extends CommonOptions, DateNFOption {
+export interface JSON2SheetOpts extends CommonOptions, DateNFOption, OriginOption {
     /** Use specified column order */
     header?: string[];
 
     /** Skip header row in generated sheet */
     skipHeader?: boolean;
 }
-
-export interface SheetJSONOpts extends JSON2SheetOpts, OriginOption {}
 
 export interface Table2SheetOpts extends CommonOptions, DateNFOption, OriginOption, SheetOption {
     /** If true, plaintext parsing will not parse values */
@@ -933,8 +931,8 @@ export interface XLSX$Utils {
     sheet_add_aoa(ws: WorkSheet, data: any[][], opts?: SheetAOAOpts): WorkSheet;
 
     /** Add an array of JS objects to a worksheet */
-    sheet_add_json(ws: WorkSheet, data: any[], opts?: SheetJSONOpts): WorkSheet;
-    sheet_add_json<T>(ws: WorkSheet, data: T[], opts?: SheetJSONOpts): WorkSheet;
+    sheet_add_json(ws: WorkSheet, data: any[], opts?: JSON2SheetOpts): WorkSheet;
+    sheet_add_json<T>(ws: WorkSheet, data: T[], opts?: JSON2SheetOpts): WorkSheet;
 
 
     consts: XLSX$Consts;
