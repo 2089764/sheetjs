@@ -5,13 +5,6 @@ var it = function(m,cb){console.log(" ".repeat(pdizzle) + m); ++pdizzle; if(cb) 
 it.skip = function(m,cb){};
 var before = function(cb){if(cb) cb();};
 var afterEach = function(cb){if(cb) cb();};
-try {
-  new Buffer(925).copy(new Buffer(3072), 2048, 0, 925);
-} catch(e) {
-  Buffer.prototype.copy = function(dst, dstStart, srcStart, srcEnd) {
-    for(var j = srcStart; j < srcEnd; ++j) dst[j + dstStart] = this[j + srcStart];
-  };
-}
 /* xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*jshint mocha:true */
