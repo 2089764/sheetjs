@@ -693,6 +693,9 @@ export interface CellObject {
     /** Range of enclosing array if formula is array formula (if applicable) */
     F?: string;
 
+    /** If true, cell is a dynamic array formula (for supported file formats) */
+    D?: boolean;
+
     /** Rich text encoding (if applicable) */
     r?: any;
 

@@ -41,6 +41,11 @@ function utf16leread(data/*:string*/)/*:string*/ {
 	for(var i = 0; i < (data.length>>1); ++i) o[i] = String.fromCharCode(data.charCodeAt(2*i) + (data.charCodeAt(2*i+1)<<8));
 	return o.join("");
 }
+function utf16lereadu(data/*:Uint8Array*/)/*:string*/ {
+	var o/*:Array<string>*/ = [];
+	for(var i = 0; i < (data.length>>1); ++i) o[i] = String.fromCharCode(data[2*i] + (data[2*i+1]<<8));
+	return o.join("");
+}
 function utf16beread(data/*:string*/)/*:string*/ {
 	var o/*:Array<string>*/ = [];
 	for(var i = 0; i < (data.length>>1); ++i) o[i] = String.fromCharCode(data.charCodeAt(2*i+1) + (data.charCodeAt(2*i)<<8));
