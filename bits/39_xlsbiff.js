@@ -138,7 +138,7 @@ function parse_FtArray(blob, length/*::, ot*/) {
 		var ft = blob.read_shift(2);
 		blob.l-=2;
 		try {
-			fts.push(FtTab[ft](blob, tgt - blob.l));
+			fts[ft] = FtTab[ft](blob, tgt - blob.l);
 		} catch(e) { blob.l = tgt; return fts; }
 	}
 	if(blob.l != tgt) blob.l = tgt; //throw new Error("bad Object Ft-sequence");
@@ -696,9 +696,11 @@ function parse_Lbl(blob, length, opts) {
 	};
 }
 
-/* [MS-XLS] 2.4.106 TODO: verify filename encoding */
+/* [MS-XLS] 2.4.106 TODO: legacy record filename encoding */
 function parse_ExternSheet(blob, length, opts) {
 	if(opts.biff < 8) return parse_BIFF5ExternSheet(blob, length, opts);
+	/* see issue 2907 */
+	if(!(opts.biff > 8) && (length == blob[blob.l] + (blob[blob.l+1] == 0x03 ? 1 : 0) + 1)) return parse_BIFF5ExternSheet(blob, length, opts);
 	var o = [], target = blob.l + length, len = blob.read_shift(opts.biff > 8 ? 4 : 2);
 	while(len-- !== 0) o.push(parse_XTI(blob, opts.biff > 8 ? 12 : 6, opts));
 		// [iSupBook, itabFirst, itabLast];
