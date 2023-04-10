@@ -14,9 +14,9 @@ export const SSF: any;
 // export { CFB };
 export const CFB: any;
 
-/** ESM ONLY! Set internal `fs` instance */
+/** Set internal `fs` instance */
 export function set_fs(fs: any): void;
-/** ESM ONLY! Set internal codepage tables */
+/** Set internal codepage tables */
 export function set_cptable(cptable: any): void;
 
 /** NODE ONLY! Attempts to read filename and parse */
