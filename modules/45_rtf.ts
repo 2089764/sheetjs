@@ -1,5 +1,6 @@
-import { WorkBook, WorkSheet, Range, CellObject, DenseSheet, SparseSheet } from '../';
+import { WorkBook, WorkSheet, Range, CellObject, DenseSheet, SparseSheet, ParsingOptions, WritingOptions } from '../';
 import type { utils } from "../";
+type RawData = any;
 
 declare var encode_cell: typeof utils.encode_cell;
 declare var encode_range: typeof utils.encode_range;
@@ -12,7 +13,7 @@ declare var has_buf: boolean;
 declare function Base64_decode(s: string): string;
 declare function fuzzynum(s: string): number;
 
-function rtf_to_sheet(d/*:RawData*/, opts)/*:Worksheet*/ {
+function rtf_to_sheet(d: RawData, opts: ParsingOptions): WorkSheet {
 	switch(opts.type) {
 		case 'base64': return rtf_to_sheet_str(Base64_decode(d), opts);
 		case 'binary': return rtf_to_sheet_str(d, opts);
@@ -23,7 +24,7 @@ function rtf_to_sheet(d/*:RawData*/, opts)/*:Worksheet*/ {
 }
 
 /* TODO: this is a stub */
-function rtf_to_sheet_str(str: string, opts)/*:Worksheet*/ {
+function rtf_to_sheet_str(str: string, opts: ParsingOptions): WorkSheet {
 	var o = opts || {};
 	// ESBuild issue 2375
 	var ws: WorkSheet = {} as WorkSheet;
@@ -71,14 +72,14 @@ function rtf_to_sheet_str(str: string, opts)/*:Worksheet*/ {
 	return ws;
 }
 
-function rtf_to_workbook(d/*:RawData*/, opts): WorkBook {
+function rtf_to_workbook(d: RawData, opts: ParsingOptions): WorkBook {
 	var wb: WorkBook = sheet_to_workbook(rtf_to_sheet(d, opts), opts);
 	wb.bookType = "rtf";
 	return wb;
 }
 
 /* TODO: this is a stub */
-function sheet_to_rtf(ws: WorkSheet, opts): string {
+function sheet_to_rtf(ws: WorkSheet, opts: WritingOptions): string {
 	var o: string[] = ["{\\rtf1\\ansi"];
 	if(!ws["!ref"]) return o[0] + "}";
 	var r = safe_decode_range(ws['!ref']), cell: CellObject;

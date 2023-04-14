@@ -214,7 +214,7 @@ function write_shallow(proto: ProtoMessage): Uint8Array {
 //<<export { parse_shallow, write_shallow };
 
 /** Map over each entry in a repeated (or single-value) field */
-function mappa<U>(data: ProtoField, cb:(Uint8Array) => U): U[] {
+function mappa<U>(data: ProtoField, cb: (u: Uint8Array) => U): U[] {
 	return data?.map(d =>  cb(d.data)) || [];
 }
 
@@ -874,9 +874,9 @@ function parse_numbers_iwa(cfb: CFB$Container, opts?: ParsingOptions ): WorkBook
 		if(!s.name.match(/\.iwa$/)) return;
 		if(s.content[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 		var o: Uint8Array;
-		try { o = decompress_iwa_file(s.content as Uint8Array); } catch(e) { return console.log("?? " + s.content.length + " " + (e.message || e)); }
+		try { o = decompress_iwa_file(s.content as Uint8Array); } catch(e: any) { return console.log("?? " + s.content.length + " " + ((e as Error).message || e)); }
 		var packets: IWAArchiveInfo[];
-		try { packets = parse_iwa_file(o); } catch(e) { return console.log("## " + (e.message || e)); }
+		try { packets = parse_iwa_file(o); } catch(e: any) { return console.log("## " + ((e as Error).message || e)); }
 		packets.forEach(packet => { M[packet.id] = packet.messages; indices.push(packet.id); });
 	});
 	if(!indices.length) throw new Error("File has no messages");
