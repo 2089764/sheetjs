@@ -1903,6 +1903,21 @@ describe('invalid files', function() {
 			wb.SheetNames.push(wb.SheetNames[0]);
 			assert.throws(function() { X.write(wb, {type:'binary'}); });
 		});
+		it('should fail if sheet name is not valid', function() {
+			var names = [
+				"", // cannot be blank
+				"abcdefghijklmnopqrstuvwxyz1234567890", // cannot exceed 31 chars
+				"'sheetjs", "sheetjs'", // cannot start or end with apostrophe
+				"History", // cannot be History
+				"Sheet:JS", "Sheet]JS", "Sheet[JS", "Sheet*JS", // bad characters
+				"Sheet?JS", "Sheet\\JS", "Sheet\/JS"
+			];
+			names.forEach(function(n) { assert.throws(function() {
+				var wb = { SheetNames: [n], Sheets: {} };
+				wb.Sheets[n] = X.utils.aoa_to_sheet([["SheetJS"]]);
+				X.write(wb, {type:"binary", bookType:"xlsx"});
+			}); });
+		});
 	});
 });
 

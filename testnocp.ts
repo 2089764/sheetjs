@@ -2340,7 +2340,7 @@ Deno.test('dbf', async function(t) {
 		});
 	});
 });
-import { JSDOM } from 'jsdom';
+const JSDOM = false; //import { JSDOM } from 'jsdom'; // breaks in latest deno
 var domtest = false; // error: Error: Not implemented: isContext
 var inserted_dom_elements = [];
 
@@ -2353,6 +2353,7 @@ function get_dom_element(html: string) {
 		return domelt.children[0];
 	}
 	if(!JSDOM) throw new Error("Browser test fail");
+  // @ts-ignore
 	return new JSDOM(html).window.document.body.children[0];
 }
 

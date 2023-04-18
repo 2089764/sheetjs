@@ -227,21 +227,21 @@ export interface ParsingOptions extends CommonOptions {
     /** If true, preserve _xlfn. prefixes in formula function names */
     xlfn?: boolean;
 
+    /** If true, generate dense-mode worksheets */
     dense?: boolean;
+
+    /**
+     * For single-sheet formats (including CSV), override the worksheet name
+     * @default "Sheet1"
+     */
+    sheet?: string;
 
     PRN?: boolean;
 }
 
-export interface SheetOption {
-  /**
-   * Name of Worksheet (for single-sheet formats)
-   * @default ''
-   */
-  sheet?: string;
-}
 
 /** Options for write and writeFile */
-export interface WritingOptions extends CommonOptions, SheetOption {
+export interface WritingOptions extends CommonOptions {
     /** Output data encoding */
     type?: 'base64' | 'binary' | 'buffer' | 'file' | 'array' | 'string';
 
@@ -285,6 +285,15 @@ export interface WritingOptions extends CommonOptions, SheetOption {
 
     /** Base64 encoding of NUMBERS base for exports */
     numbers?: string;
+
+    /**
+     * For single-sheet formats, export the specified worksheet.
+     *
+     * The property must be a string (sheet name) or number (`SheetNames` index).
+     *
+     * If this option is omitted, the first worksheet will be exported.
+     */
+    sheet?: string | number;
 }
 
 /** Workbook Object */
@@ -814,7 +823,7 @@ export interface JSON2SheetOpts extends CommonOptions, DateNFOption, OriginOptio
     skipHeader?: boolean;
 }
 
-export interface Table2SheetOpts extends CommonOptions, DateNFOption, OriginOption, SheetOption {
+export interface Table2SheetOpts extends CommonOptions, DateNFOption, OriginOption {
     /** If true, plaintext parsing will not parse values */
     raw?: boolean;
 
@@ -826,6 +835,20 @@ export interface Table2SheetOpts extends CommonOptions, DateNFOption, OriginOpti
 
     /** If true, hidden rows and cells will not be parsed */
     display?: boolean;
+
+    /**
+     * Override the worksheet name
+     * @default "Sheet1"
+     */
+    sheet?: string;
+}
+
+export interface Table2BookOpts extends Table2SheetOpts {
+    /**
+     * Override the worksheet name
+     * @default "Sheet1"
+     */
+     sheet?: string;
 }
 
 /** General utilities */
@@ -842,7 +865,7 @@ export interface XLSX$Utils {
 
     /** BROWSER ONLY! Converts a TABLE DOM element to a worksheet. */
     table_to_sheet(data: any,  opts?: Table2SheetOpts): WorkSheet;
-    table_to_book(data: any,  opts?: Table2SheetOpts): WorkBook;
+    table_to_book(data: any,  opts?: Table2BookOpts): WorkBook;
     sheet_add_dom(ws: WorkSheet, data: any, opts?: Table2SheetOpts): WorkSheet;
 
     /* --- Export Functions --- */

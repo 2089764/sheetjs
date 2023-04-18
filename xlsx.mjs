@@ -3,7 +3,7 @@
 /*exported XLSX */
 /*global process:false, Buffer:false, ArrayBuffer:false, DataView:false, Deno:false */
 var XLSX = {};
-XLSX.version = '0.19.2';
+XLSX.version = '0.19.3';
 var current_codepage = 1200, current_ansi = 1252;
 /*:: declare var cptable:any; */
 /*global cptable:true, window */
@@ -5517,68 +5517,67 @@ function add_rels(rels, rId/*:number*/, f, type, relobj, targetmode/*:?string*/)
 	rels[('/' + relobj.Target).replace("//","/")] = relobj;
 	return rId;
 }
-/* Open Document Format for Office Applications (OpenDocument) Version 1.2 */
-/* Part 3 Section 4 Manifest File */
 var CT_ODS = "application/vnd.oasis.opendocument.spreadsheet";
 function parse_manifest(d, opts) {
-	var str = xlml_normalize(d);
-	var Rn;
-	var FEtag;
-	while((Rn = xlmlregex.exec(str))) switch(Rn[3]) {
-		case 'manifest': break; // 4.2 <manifest:manifest>
-		case 'file-entry': // 4.3 <manifest:file-entry>
-			FEtag = parsexmltag(Rn[0], false);
-			if(FEtag.path == '/' && FEtag.type !== CT_ODS) throw new Error("This OpenDocument is not a spreadsheet");
-			break;
-		case 'encryption-data': // 4.4 <manifest:encryption-data>
-		case 'algorithm': // 4.5 <manifest:algorithm>
-		case 'start-key-generation': // 4.6 <manifest:start-key-generation>
-		case 'key-derivation': // 4.7 <manifest:key-derivation>
-			throw new Error("Unsupported ODS Encryption");
-		default: if(opts && opts.WTF) throw Rn;
-	}
+  var str = xlml_normalize(d);
+  var Rn;
+  var FEtag;
+  while (Rn = xlmlregex.exec(str))
+    switch (Rn[3]) {
+      case "manifest":
+        break;
+      case "file-entry":
+        FEtag = parsexmltag(Rn[0], false);
+        if (FEtag.path == "/" && FEtag.type !== CT_ODS)
+          throw new Error("This OpenDocument is not a spreadsheet");
+        break;
+      case "encryption-data":
+      case "algorithm":
+      case "start-key-generation":
+      case "key-derivation":
+        throw new Error("Unsupported ODS Encryption");
+      default:
+        if (opts && opts.WTF)
+          throw Rn;
+    }
 }
-
-function write_manifest(manifest/*:Array<Array<string> >*/)/*:string*/ {
-	var o = [XML_HEADER];
-	o.push('<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">\n');
-	o.push('  <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>\n');
-	for(var i = 0; i < manifest.length; ++i) o.push('  <manifest:file-entry manifest:full-path="' + manifest[i][0] + '" manifest:media-type="' + manifest[i][1] + '"/>\n');
-	o.push('</manifest:manifest>');
-	return o.join("");
+function write_manifest(manifest) {
+  var o = [XML_HEADER];
+  o.push('<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">\n');
+  o.push('  <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>\n');
+  for (var i = 0; i < manifest.length; ++i)
+    o.push('  <manifest:file-entry manifest:full-path="' + manifest[i][0] + '" manifest:media-type="' + manifest[i][1] + '"/>\n');
+  o.push("</manifest:manifest>");
+  return o.join("");
 }
-
-/* Part 3 Section 6 Metadata Manifest File */
-function write_rdf_type(file/*:string*/, res/*:string*/, tag/*:?string*/) {
-	return [
-		'  <rdf:Description rdf:about="' + file + '">\n',
-		'    <rdf:type rdf:resource="http://docs.oasis-open.org/ns/office/1.2/meta/' + (tag || "odf") + '#' + res + '"/>\n',
-		'  </rdf:Description>\n'
-	].join("");
+function write_rdf_type(file, res, tag) {
+  return [
+    '  <rdf:Description rdf:about="' + file + '">\n',
+    '    <rdf:type rdf:resource="http://docs.oasis-open.org/ns/office/1.2/meta/' + (tag || "odf") + "#" + res + '"/>\n',
+    "  </rdf:Description>\n"
+  ].join("");
 }
-function write_rdf_has(base/*:string*/, file/*:string*/) {
-	return [
-		'  <rdf:Description rdf:about="' + base + '">\n',
-		'    <ns0:hasPart xmlns:ns0="http://docs.oasis-open.org/ns/office/1.2/meta/pkg#" rdf:resource="' + file + '"/>\n',
-		'  </rdf:Description>\n'
-	].join("");
+function write_rdf_has(base, file) {
+  return [
+    '  <rdf:Description rdf:about="' + base + '">\n',
+    '    <ns0:hasPart xmlns:ns0="http://docs.oasis-open.org/ns/office/1.2/meta/pkg#" rdf:resource="' + file + '"/>\n',
+    "  </rdf:Description>\n"
+  ].join("");
 }
 function write_rdf(rdf) {
-	var o = [XML_HEADER];
-	o.push('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n');
-	for(var i = 0; i != rdf.length; ++i) {
-		o.push(write_rdf_type(rdf[i][0], rdf[i][1]));
-		o.push(write_rdf_has("",rdf[i][0]));
-	}
-	o.push(write_rdf_type("","Document", "pkg"));
-	o.push('</rdf:RDF>');
-	return o.join("");
+  var o = [XML_HEADER];
+  o.push('<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n');
+  for (var i = 0; i != rdf.length; ++i) {
+    o.push(write_rdf_type(rdf[i][0], rdf[i][1]));
+    o.push(write_rdf_has("", rdf[i][0]));
+  }
+  o.push(write_rdf_type("", "Document", "pkg"));
+  o.push("</rdf:RDF>");
+  return o.join("");
 }
-/* TODO: pull properties */
-function write_meta_ods(/*:: wb: Workbook, opts: any*/)/*:string*/ {
-	return '<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xlink="http://www.w3.org/1999/xlink" office:version="1.2"><office:meta><meta:generator>Sheet' + 'JS ' + XLSX.version + '</meta:generator></office:meta></office:document-meta>';
+function write_meta_ods(wb, opts) {
+  return '<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xlink="http://www.w3.org/1999/xlink" office:version="1.2"><office:meta><meta:generator>SheetJS ' + XLSX.version + "</meta:generator></office:meta></office:document-meta>";
 }
-
 /* ECMA-376 Part II 11.1 Core Properties Part */
 /* [MS-OSHARED] 2.3.3.2.[1-2].1 (PIDSI/PIDDSI) */
 var CORE_PROPS/*:Array<Array<string> >*/ = [
@@ -6705,7 +6704,7 @@ function parse_FtArray(blob, length/*::, ot*/) {
 		var ft = blob.read_shift(2);
 		blob.l-=2;
 		try {
-			fts.push(FtTab[ft](blob, tgt - blob.l));
+			fts[ft] = FtTab[ft](blob, tgt - blob.l);
 		} catch(e) { blob.l = tgt; return fts; }
 	}
 	if(blob.l != tgt) blob.l = tgt; //throw new Error("bad Object Ft-sequence");
@@ -7263,9 +7262,11 @@ function parse_Lbl(blob, length, opts) {
 	};
 }
 
-/* [MS-XLS] 2.4.106 TODO: verify filename encoding */
+/* [MS-XLS] 2.4.106 TODO: legacy record filename encoding */
 function parse_ExternSheet(blob, length, opts) {
 	if(opts.biff < 8) return parse_BIFF5ExternSheet(blob, length, opts);
+	/* see issue 2907 */
+	if(!(opts.biff > 8) && (length == blob[blob.l] + (blob[blob.l+1] == 0x03 ? 1 : 0) + 1)) return parse_BIFF5ExternSheet(blob, length, opts);
 	var o = [], target = blob.l + length, len = blob.read_shift(opts.biff > 8 ? 4 : 2);
 	while(len-- !== 0) o.push(parse_XTI(blob, opts.biff > 8 ? 12 : 6, opts));
 		// [iSupBook, itabFirst, itabLast];
@@ -12181,6 +12182,7 @@ function sheet_insert_comments(sheet/*:WorkSheet*/, comments/*:Array<RawComment>
 	var cell/*:Cell*/;
 	comments.forEach(function(comment) {
 		var r = decode_cell(comment.ref);
+		if(r.r < 0 || r.c < 0) return;
 		if(dense) {
 			if(!sheet["!data"][r.r]) sheet["!data"][r.r] = [];
 			cell = sheet["!data"][r.r][r.c];
@@ -17226,14 +17228,17 @@ function safe1904(wb/*:Workbook*/)/*:string*/ {
 
 var badchars = /*#__PURE__*/":][*?\/\\".split("");
 function check_ws_name(n/*:string*/, safe/*:?boolean*/)/*:boolean*/ {
-	if(n.length > 31) { if(safe) return false; throw new Error("Sheet names cannot exceed 31 chars"); }
-	var _good = true;
-	badchars.forEach(function(c) {
-		if(n.indexOf(c) == -1) return;
-		if(!safe) throw new Error("Sheet name cannot contain : \\ / ? * [ ]");
-		_good = false;
-	});
-	return _good;
+	try {
+		if(n == "") throw new Error("Sheet name cannot be blank");
+		if(n.length > 31) throw new Error("Sheet name cannot exceed 31 chars");
+		if(n.charCodeAt(0) == 0x27 || n.charCodeAt(n.length - 1) == 0x27) throw new Error("Sheet name cannot start or end with apostrophe (')");
+		if(n.toLowerCase() == "history") throw new Error("Sheet name cannot be 'History'");
+		badchars.forEach(function(c) {
+			if(n.indexOf(c) == -1) return;
+			throw new Error("Sheet name cannot contain : \\ / ? * [ ]");
+		});
+	} catch(e) { if(safe) return false; throw e; }
+	return true;
 }
 function check_wb_names(N, S, codes) {
 	N.forEach(function(n,i) {
@@ -21722,7 +21727,7 @@ function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HT
 			sp["data-t"] = cell && cell.t || 'z';
 			if(cell.v != null) sp["data-v"] = cell.v;
 			if(cell.z != null) sp["data-z"] = cell.z;
-			if(cell.l && (cell.l.Target || "#").charAt(0) != "#") w = '<a href="' + cell.l.Target +'">' + w + '</a>';
+			if(cell.l && (cell.l.Target || "#").charAt(0) != "#") w = '<a href="' + escapehtml(cell.l.Target) +'">' + w + '</a>';
 		}
 		sp.id = (o.id || "sjs") + "-" + coord;
 		oo.push(writextag('td', w, sp));
