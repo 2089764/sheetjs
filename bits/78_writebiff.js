@@ -62,6 +62,10 @@ function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
 			if((v == (v|0)) && (v >= 0) && (v < 65536))
 				write_biff_rec(ba, 0x0002, write_BIFF2INT(R, C, v));
+			else if(isNaN(v))
+				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x24, "e")); // #NUM!
+			else if(!isFinite(v))
+				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x07, "e")); // #DIV/0!
 			else
 				write_biff_rec(ba, 0x0003, write_BIFF2NUM(R,C, v));
 			return;
@@ -182,8 +186,10 @@ function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 	else switch(cell.t) {
 		case 'd': case 'n':
 			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
+			if(isNaN(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x24, os, opts, "e")); // #NUM!
+			else if(!isFinite(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x07, os, opts, "e")); // #DIV/0!
 			/* TODO: emit RK as appropriate */
-			write_biff_rec(ba, 0x0203 /* Number */, write_Number(R, C, v, os, opts));
+			else write_biff_rec(ba, 0x0203 /* Number */, write_Number(R, C, v, os, opts));
 			break;
 		case 'b': case 'e':
 			write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, cell.v, os, opts, cell.t));
