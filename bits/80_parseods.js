@@ -596,6 +596,9 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 				if(Rn[1]==='/' && (!ctag || !ctag['string-value'])) {
 					var ptp = parse_text_p(str.slice(textpidx,Rn.index), textptag);
 					textp = (textp.length > 0 ? textp + "\n" : "") + ptp[0];
+				} else if(Rn[0].slice(-2) == "/>") {
+					/* TODO: is self-closing 文本串 valid? */
+					textp += "\n";
 				} else { textptag = parsexmltag(Rn[0], false); textpidx = Rn.index + Rn[0].length; }
 				break; // <text:p>
 			case 's': break; // <text:s>

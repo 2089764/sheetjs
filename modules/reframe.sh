@@ -2,7 +2,7 @@
 set -eo pipefail
 INF=${1:-test.numbers}
 OUTF=${2:-reframed.numbers}
-chmod a+w "$OUTF"
+if [ -e "$OUTF" ]; then chmod a+w "$OUTF"; fi
 cp "$INF" "$OUTF"
 chmod a-w "$OUTF"
 sleep 0.1
