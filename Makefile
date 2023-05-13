@@ -246,8 +246,7 @@ misc/coverage.html: $(TARGET) test.js
 coveralls: ## Coverage Test + Send to coveralls.io
 	mocha --require blanket --reporter mocha-lcov-reporter -t 30000 | node ./node_modules/coveralls/bin/coveralls.js
 
-DEMOMDS=$(sort $(wildcard demos/*/README.md))
-MDLINT=$(DEMOMDS) README.md demos/README.md
+MDLINT=README.md
 .PHONY: mdlint
 mdlint: $(MDLINT) ## Check markdown documents
 	./node_modules/.bin/alex $^

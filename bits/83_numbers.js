@@ -146,19 +146,18 @@ function write_packed_varints(nums) {
 }
 function varint_to_i32(buf) {
   var l = 0, i32 = buf[l] & 127;
-  varint:
-    if (buf[l++] >= 128) {
-      i32 |= (buf[l] & 127) << 7;
-      if (buf[l++] < 128)
-        break varint;
-      i32 |= (buf[l] & 127) << 14;
-      if (buf[l++] < 128)
-        break varint;
-      i32 |= (buf[l] & 127) << 21;
-      if (buf[l++] < 128)
-        break varint;
-      i32 |= (buf[l] & 127) << 28;
-    }
+  if (buf[l++] < 128)
+    return i32;
+  i32 |= (buf[l] & 127) << 7;
+  if (buf[l++] < 128)
+    return i32;
+  i32 |= (buf[l] & 127) << 14;
+  if (buf[l++] < 128)
+    return i32;
+  i32 |= (buf[l] & 127) << 21;
+  if (buf[l++] < 128)
+    return i32;
+  i32 |= (buf[l] & 15) << 28;
   return i32;
 }
 function varint_to_u64(buf) {
@@ -451,7 +450,7 @@ function compress_iwa_file(buf) {
   return u8concat(out);
 }
 var numbers_lut_new = function() {
-  return { sst: [], rsst: [], ofmt: [], nfmt: [] };
+  return { sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [] };
 };
 function numbers_format_cell(cell, t, flags, ofmt, nfmt) {
   var _a, _b, _c, _d;
@@ -627,9 +626,12 @@ function parse_old_storage(buf, lut, v) {
       break;
     case 9:
       {
-        if (ridx > -1)
-          ret = { t: "s", v: lut.rsst[ridx] };
-        else
+        if (ridx > -1) {
+          var rts = lut.rsst[ridx];
+          ret = { t: "s", v: rts.v };
+          if (rts.l)
+            ret.l = { Target: rts.l };
+        } else
           throw new Error("Unsupported cell type ".concat(buf[subarray](0, 4)));
       }
       break;
@@ -647,7 +649,7 @@ function parse_new_storage(buf, lut) {
   var flags = dv.getUint32(4, true);
   var fields = dv.getUint32(8, true);
   var doff = 12;
-  var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dt = new Date(2001, 0, 1);
+  var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dt = new Date(2001, 0, 1), eidx = -1, fidx = -1;
   if (fields & 1) {
     d128 = readDecimal128LE(buf, doff);
     doff += 16;
@@ -666,6 +668,16 @@ function parse_new_storage(buf, lut) {
   }
   if (fields & 16) {
     ridx = dv.getUint32(doff, true);
+    doff += 4;
+  }
+  doff += popcnt(fields & 480) * 4;
+  if (fields & 512) {
+    fidx = dv.getUint32(doff, true);
+    doff += 4;
+  }
+  doff += popcnt(fields & 1024) * 4;
+  if (fields & 2048) {
+    eidx = dv.getUint32(doff, true);
     doff += 4;
   }
   var ret;
@@ -692,7 +704,15 @@ function parse_new_storage(buf, lut) {
       ret = { t: "e", v: 0 };
       break;
     case 9:
-      ret = { t: "s", v: lut.rsst[ridx] };
+      {
+        if (ridx > -1) {
+          var rts = lut.rsst[ridx];
+          ret = { t: "s", v: rts.v };
+          if (rts.l)
+            ret.l = { Target: rts.l };
+        } else
+          throw new Error("Unsupported cell type ".concat(buf[1], " : ").concat(fields & 31, " : ").concat(buf[subarray](0, 4)));
+      }
       break;
     case 10:
       ret = { t: "n", v: d128 };
@@ -700,7 +720,7 @@ function parse_new_storage(buf, lut) {
     default:
       throw new Error("Unsupported cell type ".concat(buf[1], " : ").concat(fields & 31, " : ").concat(buf[subarray](0, 4)));
   }
-  doff += popcnt(fields & 8160) * 4;
+  doff += popcnt(fields & 4096) * 4;
   if (fields & 516096) {
     if (zidx == -1)
       zidx = dv.getUint32(doff, true);
@@ -712,7 +732,7 @@ function parse_new_storage(buf, lut) {
     ret.v /= 86400;
   return ret;
 }
-function write_new_storage(cell, sst) {
+function write_new_storage(cell, sst, rsst) {
   var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
   out[0] = 5;
   switch (cell.t) {
@@ -729,14 +749,29 @@ function write_new_storage(cell, sst) {
       l += 8;
       break;
     case "s":
-      var s = cell.v == null ? "" : String(cell.v);
-      var isst = sst.indexOf(s);
-      if (isst == -1)
-        sst[isst = sst.length] = s;
-      out[1] = 3;
-      dv.setUint32(l, isst, true);
-      flags |= 8;
-      l += 4;
+      {
+        var s = cell.v == null ? "" : String(cell.v);
+        if (cell.l) {
+          var irsst = rsst.findIndex(function(v) {
+            var _a;
+            return v.v == s && v.l == ((_a = cell.l) == null ? void 0 : _a.Target);
+          });
+          if (irsst == -1)
+            rsst[irsst = rsst.length] = { v: s, l: cell.l.Target };
+          out[1] = 9;
+          dv.setUint32(l, irsst, true);
+          flags |= 16;
+          l += 4;
+        } else {
+          var isst = sst.indexOf(s);
+          if (isst == -1)
+            sst[isst = sst.length] = s;
+          out[1] = 3;
+          dv.setUint32(l, isst, true);
+          flags |= 8;
+          l += 4;
+        }
+      }
       break;
     default:
       throw "unsupported cell type " + cell.t;
@@ -744,31 +779,46 @@ function write_new_storage(cell, sst) {
   dv.setUint32(8, flags, true);
   return out[subarray](0, l);
 }
-function write_old_storage(cell, sst) {
+function write_old_storage(cell, sst, rsst) {
   var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
   out[0] = 4;
   switch (cell.t) {
     case "n":
-      out[2] = 2;
+      out[1] = 2;
       dv.setFloat64(l, cell.v, true);
       flags |= 32;
       l += 8;
       break;
     case "b":
-      out[2] = 6;
+      out[1] = 6;
       dv.setFloat64(l, cell.v ? 1 : 0, true);
       flags |= 32;
       l += 8;
       break;
     case "s":
-      var s = cell.v == null ? "" : String(cell.v);
-      var isst = sst.indexOf(s);
-      if (isst == -1)
-        sst[isst = sst.length] = s;
-      out[2] = 3;
-      dv.setUint32(l, isst, true);
-      flags |= 16;
-      l += 4;
+      {
+        var s = cell.v == null ? "" : String(cell.v);
+        if (cell.l) {
+          var irsst = rsst.findIndex(function(v) {
+            var _a;
+            return v.v == s && v.l == ((_a = cell.l) == null ? void 0 : _a.Target);
+          });
+          if (irsst == -1)
+            rsst[irsst = rsst.length] = { v: s, l: cell.l.Target };
+          out[1] = 9;
+          dv.setUint32(l, irsst, true);
+          flags |= 512;
+          l += 4;
+        } else {
+          var isst = sst.indexOf(s);
+          if (isst == -1)
+            sst[isst = sst.length] = s;
+          out[1] = 3;
+          dv.setUint32(l, isst, true);
+          flags |= 16;
+          l += 4;
+        }
+      }
       break;
     default:
       throw "unsupported cell type " + cell.t;
@@ -822,6 +872,7 @@ function parse_TST_TableDataList(M, root) {
   var entries = pb[3];
   var data = [];
   (entries || []).forEach(function(entry) {
+    var _a, _b;
     var le = parse_shallow(entry.data);
     if (!le[1])
       return;
@@ -839,13 +890,42 @@ function parse_TST_TableDataList(M, root) {
           if (mtype != 2001)
             throw new Error("2000 unexpected reference to ".concat(mtype));
           var tswpsa = parse_shallow(rtpref.data);
-          data[key] = tswpsa[3].map(function(x) {
+          var richtext = { v: tswpsa[3].map(function(x) {
             return u8str(x.data);
-          }).join("");
+          }).join("") };
+          data[key] = richtext;
+          sfields:
+            if ((_a = tswpsa == null ? void 0 : tswpsa[11]) == null ? void 0 : _a[0]) {
+              var smartfields = (_b = parse_shallow(tswpsa[11][0].data)) == null ? void 0 : _b[1];
+              if (!smartfields)
+                break sfields;
+              smartfields.forEach(function(sf) {
+                var _a2, _b2, _c;
+                var attr = parse_shallow(sf.data);
+                if ((_a2 = attr[2]) == null ? void 0 : _a2[0]) {
+                  var obj = M[parse_TSP_Reference((_b2 = attr[2]) == null ? void 0 : _b2[0].data)][0];
+                  var objtype = varint_to_i32(obj.meta[1][0].data);
+                  switch (objtype) {
+                    case 2032:
+                      var hlink = parse_shallow(obj.data);
+                      if (((_c = hlink == null ? void 0 : hlink[2]) == null ? void 0 : _c[0]) && !richtext.l)
+                        richtext.l = u8str(hlink[2][0].data);
+                      break;
+                    case 2039:
+                      break;
+                    default:
+                      console.log("unrecognized ObjectAttribute type ".concat(objtype));
+                  }
+                }
+              });
+            }
         }
         break;
       case 2:
         data[key] = parse_shallow(le[6][0].data);
+        break;
+      case 3:
+        data[key] = parse_shallow(le[5][0].data);
         break;
       default:
         throw type;
@@ -913,7 +993,7 @@ function parse_TST_Tile(M, root) {
   };
 }
 function parse_TST_TableModelArchive(M, root, ws) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a, _b, _c, _d, _e, _f, _g, _h;
   var pb = parse_shallow(root.data);
   var range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
   range.e.r = (varint_to_i32(pb[6][0].data) >>> 0) - 1;
@@ -928,11 +1008,15 @@ function parse_TST_TableModelArchive(M, root, ws) {
   var lut = numbers_lut_new();
   if ((_a = store[4]) == null ? void 0 : _a[0])
     lut.sst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[4][0].data)][0]);
-  if ((_b = store[11]) == null ? void 0 : _b[0])
+  if ((_b = store[6]) == null ? void 0 : _b[0])
+    lut.fmla = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[6][0].data)][0]);
+  if ((_c = store[11]) == null ? void 0 : _c[0])
     lut.ofmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[11][0].data)][0]);
-  if ((_c = store[17]) == null ? void 0 : _c[0])
+  if ((_d = store[12]) == null ? void 0 : _d[0])
+    lut.ferr = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[12][0].data)][0]);
+  if ((_e = store[17]) == null ? void 0 : _e[0])
     lut.rsst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[17][0].data)][0]);
-  if ((_d = store[22]) == null ? void 0 : _d[0])
+  if ((_f = store[22]) == null ? void 0 : _f[0])
     lut.nfmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[22][0].data)][0]);
   var tile = parse_shallow(store[3][0].data);
   var _R = 0;
@@ -959,12 +1043,12 @@ function parse_TST_TableModelArchive(M, root, ws) {
     });
     _R += _tile.nrows;
   });
-  if ((_e = store[13]) == null ? void 0 : _e[0]) {
+  if ((_g = store[13]) == null ? void 0 : _g[0]) {
     var ref = M[parse_TSP_Reference(store[13][0].data)][0];
     var mtype = varint_to_i32(ref.meta[1][0].data);
     if (mtype != 6144)
       throw new Error("Expected merge type 6144, found ".concat(mtype));
-    ws["!merges"] = (_f = parse_shallow(ref.data)) == null ? void 0 : _f[1].map(function(pi) {
+    ws["!merges"] = (_h = parse_shallow(ref.data)) == null ? void 0 : _h[1].map(function(pi) {
       var merge = parse_shallow(pi.data);
       var origin = u8_to_dataview(parse_shallow(merge[1][0].data)[1][0].data), size = u8_to_dataview(parse_shallow(merge[2][0].data)[1][0].data);
       return {
@@ -1079,7 +1163,7 @@ function parse_numbers_iwa(cfb, opts) {
     throw new Error("Cannot find Document root");
   return parse_TN_DocumentArchive(M, docroot, opts);
 }
-function write_TST_TileRowInfo(data, SST, wide) {
+function write_TST_TileRowInfo(data, SST, RSST, wide) {
   var _a, _b;
   var tri = [
     [],
@@ -1113,7 +1197,7 @@ function write_TST_TileRowInfo(data, SST, wide) {
   var _dv = u8_to_dataview(tri[4][0].data), _last_offset = 0, _cell_storage = [];
   var width = wide ? 4 : 1;
   for (var C = 0; C < data.length; ++C) {
-    if (data[C] == null) {
+    if (data[C] == null || data[C].t == "z" || data[C].t == "e") {
       dv.setUint16(C * 2, 65535, true);
       _dv.setUint16(C * 2, 65535);
       continue;
@@ -1121,25 +1205,23 @@ function write_TST_TileRowInfo(data, SST, wide) {
     dv.setUint16(C * 2, last_offset / width, true);
     _dv.setUint16(C * 2, _last_offset / width, true);
     var celload, _celload;
-    switch (typeof data[C]) {
-      case "string":
-        celload = write_new_storage({ t: "s", v: data[C] }, SST);
-        _celload = write_old_storage({ t: "s", v: data[C] }, SST);
-        break;
-      case "number":
-        celload = write_new_storage({ t: "n", v: data[C] }, SST);
-        _celload = write_old_storage({ t: "n", v: data[C] }, SST);
-        break;
-      case "boolean":
-        celload = write_new_storage({ t: "b", v: data[C] }, SST);
-        _celload = write_old_storage({ t: "b", v: data[C] }, SST);
-        break;
-      default:
-        if (data[C] instanceof Date) {
-          celload = write_new_storage({ t: "s", v: data[C].toISOString() }, SST);
-          _celload = write_old_storage({ t: "s", v: data[C].toISOString() }, SST);
+    switch (data[C].t) {
+      case "d":
+        if (data[C].v instanceof Date) {
+          celload = write_new_storage({ t: "s", v: data[C].v.toISOString() }, SST, RSST);
+          _celload = write_old_storage({ t: "s", v: data[C].v.toISOString() }, SST, RSST);
           break;
         }
+        celload = write_new_storage(data[C], SST, RSST);
+        _celload = write_old_storage(data[C], SST, RSST);
+        break;
+      case "s":
+      case "n":
+      case "b":
+        celload = write_new_storage(data[C], SST, RSST);
+        _celload = write_old_storage(data[C], SST, RSST);
+        break;
+      default:
         throw new Error("Unsupported value " + data[C]);
     }
     cell_storage.push(celload);
@@ -1260,6 +1342,38 @@ function numbers_iwa_find(cfb, deps, id) {
   });
   return ainfo;
 }
+function numbers_add_msg(cfb, type, msg, path, deps, id) {
+  if (!id)
+    id = get_unique_msgid({ deps: [], location: "", type: type }, deps);
+  var loc = "".concat(path, "-").concat(id, ".iwa");
+  deps[id].location = "Root Entry" + loc;
+  CFB.utils.cfb_add(cfb, loc, compress_iwa_file(write_iwa_file([{
+    id: id,
+    messages: [write_iwam(type, write_shallow(msg))]
+  }])));
+  var newloc = loc.replace(/^[\/]/, "").replace(/^Index\//, "").replace(/\.iwa$/, "");
+  numbers_iwa_doit(cfb, deps, 2, function(ai) {
+    var mlist = parse_shallow(ai.messages[0].data);
+    mlist[3].push({ type: 2, data: write_shallow([
+      [],
+      [{ type: 0, data: write_varint49(id) }],
+      [{ type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
+      [{ type: 2, data: stru8(newloc) }],
+      [{ type: 2, data: new Uint8Array([2, 0, 0]) }],
+      [{ type: 2, data: new Uint8Array([2, 0, 0]) }],
+      [],
+      [],
+      [],
+      [],
+      [{ type: 0, data: write_varint49(0) }],
+      [],
+      [{ type: 0, data: write_varint49(0) }]
+    ]) });
+    mlist[1] = [{ type: 0, data: write_varint49(Math.max(id + 1, varint_to_i32(mlist[1][0].data))) }];
+    ai.messages[0].data = write_shallow(mlist);
+  });
+  return id;
+}
 function numbers_add_ws(cfb, deps, wsidx) {
   var sheetref = -1, newsheetref = -1;
   var remap = {};
@@ -1362,7 +1476,7 @@ function numbers_add_ws(cfb, deps, wsidx) {
   numbers_iwa_doit(cfb, deps, tmaref, function(tmaroot, arch) {
     var _a, _b;
     var tma = parse_shallow(tmaroot.messages[0].data);
-    var uuid = u8str(tma[1][0].data), new_uuid = uuid.replace(/-[A-Z0-9]*/, "-".concat(wsidx.toString(16).padStart(4, "0")));
+    var uuid = u8str(tma[1][0].data), new_uuid = uuid.replace(/-[A-Z0-9]*/, "-".concat(("0000" + wsidx.toString(16)).slice(-4)));
     tma[1][0].data = stru8(new_uuid);
     [12, 13, 29, 31, 32, 33, 39, 44, 47, 81, 82, 84].forEach(function(n) {
       return delete tma[n];
@@ -1648,8 +1762,27 @@ function write_numbers_tma(cfb, deps, ws, tmaroot, tmafile, tmaref) {
   }
   if (trunc)
     console.error("Truncating to ".concat(encode_range(range)));
-  var data = sheet_to_json(ws, { range: range, header: 1 });
+  var data = [];
+  if (ws["!data"])
+    data = ws["!data"];
+  else {
+    var colstr = [];
+    for (var _C = 0; _C <= range.e.c; ++_C)
+      colstr[_C] = encode_col(_C);
+    for (var R_ = 0; R_ <= range.e.r; ++R_) {
+      data[R_] = [];
+      var _R = "" + (R_ + 1);
+      for (_C = 0; _C <= range.e.c; ++_C) {
+        var _cell = ws[colstr[_C] + _R];
+        if (!_cell)
+          continue;
+        data[R_][_C] = _cell;
+      }
+    }
+  }
+  sheet_to_json(ws, { range: range, header: 1 });
   var SST = ["~Sh33tJ5~"];
+  var RSST = [{ v: "~54ee77S~", l: "https://sheetjs.com/" }];
   var loc = deps[tmaref].location;
   loc = loc.replace(/^Root Entry\//, "");
   loc = loc.replace(/^Index\//, "").replace(/\.iwa$/, "");
@@ -1747,7 +1880,7 @@ function write_numbers_tma(cfb, deps, ws, tmaroot, tmafile, tmaref) {
             [{ type: 0, data: write_varint49(USE_WIDE_ROWS ? 1 : 0) }]
           ];
           for (var R = tidx * tstride; R <= Math.min(range.e.r, (tidx + 1) * tstride - 1); ++R) {
-            var tilerow = write_TST_TileRowInfo(data[R], SST, USE_WIDE_ROWS);
+            var tilerow = write_TST_TileRowInfo(data[R], SST, RSST, USE_WIDE_ROWS);
             tilerow[1][0].data = write_varint49(R - tidx * tstride);
             tiledata[5].push({ data: write_shallow(tilerow), type: 2 });
           }
@@ -1883,6 +2016,166 @@ function write_numbers_tma(cfb, deps, ws, tmaroot, tmafile, tmaref) {
           });
         }
         sstroot.messages[0].data = write_shallow(sstdata);
+      });
+      var rsstref = parse_TSP_Reference(store[17][0].data);
+      numbers_iwa_doit(cfb, deps, rsstref, function(rsstroot) {
+        var rsstdata = parse_shallow(rsstroot.messages[0].data);
+        rsstdata[3] = [];
+        var style_indices = [
+          904980,
+          903835,
+          903815,
+          903845
+        ];
+        RSST.forEach(function(rsst, i) {
+          if (i == 0)
+            return;
+          var tswpsa = [
+            [],
+            [{ type: 0, data: new Uint8Array([5]) }],
+            [],
+            [{ type: 2, data: stru8(rsst.v) }]
+          ];
+          tswpsa[10] = [{ type: 0, data: new Uint8Array([1]) }];
+          tswpsa[19] = [{ type: 2, data: new Uint8Array([10, 6, 8, 0, 18, 2, 101, 110]) }];
+          tswpsa[5] = [{ type: 2, data: new Uint8Array([10, 8, 8, 0, 18, 4, 8, 155, 149, 55]) }];
+          tswpsa[2] = [{ type: 2, data: new Uint8Array([8, 148, 158, 55]) }];
+          tswpsa[6] = [{ type: 2, data: new Uint8Array([10, 6, 8, 0, 16, 0, 24, 0]) }];
+          tswpsa[7] = [{ type: 2, data: new Uint8Array([10, 8, 8, 0, 18, 4, 8, 135, 149, 55]) }];
+          tswpsa[8] = [{ type: 2, data: new Uint8Array([10, 8, 8, 0, 18, 4, 8, 165, 149, 55]) }];
+          tswpsa[14] = [{ type: 2, data: new Uint8Array([10, 6, 8, 0, 16, 0, 24, 0]) }];
+          tswpsa[24] = [{ type: 2, data: new Uint8Array([10, 6, 8, 0, 16, 0, 24, 0]) }];
+          var tswpsaid = get_unique_msgid({ deps: [], location: "", type: 2001 }, deps);
+          var tswpsarefs = [];
+          if (rsst.l) {
+            var newhlinkid = numbers_add_msg(cfb, 2032, [
+              [],
+              [],
+              [{ type: 2, data: stru8(rsst.l) }]
+            ], "/Index/Tables/DataList", deps);
+            tswpsa[11] = [];
+            var smartfield = [[], []];
+            if (!smartfield[1])
+              smartfield[1] = [];
+            smartfield[1].push({ type: 2, data: write_shallow([
+              [],
+              [{ type: 0, data: write_varint49(0) }],
+              [{ type: 2, data: write_TSP_Reference(newhlinkid) }]
+            ]) });
+            tswpsa[11][0] = { type: 2, data: write_shallow(smartfield) };
+            tswpsarefs.push(newhlinkid);
+          }
+          numbers_add_msg(cfb, 2001, tswpsa, "/Index/Tables/DataList", deps, tswpsaid);
+          numbers_iwa_doit(cfb, deps, tswpsaid, function(iwa) {
+            style_indices.forEach(function(ref) {
+              return numbers_add_oref(iwa, ref);
+            });
+            tswpsarefs.forEach(function(ref) {
+              return numbers_add_oref(iwa, ref);
+            });
+          });
+          var rtpaid = numbers_add_msg(cfb, 6218, [
+            [],
+            [{ type: 2, data: write_TSP_Reference(tswpsaid) }],
+            [],
+            [{ type: 2, data: new Uint8Array([13, 255, 255, 255, 0, 18, 10, 16, 255, 255, 1, 24, 255, 255, 255, 255, 7]) }]
+          ], "/Index/Tables/DataList", deps);
+          numbers_iwa_doit(cfb, deps, rtpaid, function(iwa) {
+            return numbers_add_oref(iwa, tswpsaid);
+          });
+          rsstdata[3].push({ type: 2, data: write_shallow([
+            [],
+            [{ type: 0, data: write_varint49(i) }],
+            [{ type: 0, data: write_varint49(1) }],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [{ type: 2, data: write_TSP_Reference(rtpaid) }]
+          ]) });
+          numbers_add_oref(rsstroot, rtpaid);
+          numbers_iwa_doit(cfb, deps, 2, function(ai) {
+            var mlist = parse_shallow(ai.messages[0].data);
+            var loc2 = deps[rsstref].location.replace(/^Root Entry\//, "").replace(/^Index\//, "").replace(/\.iwa$/, "");
+            var parentidx = mlist[3].findIndex(function(m) {
+              var _a, _b;
+              var mm = parse_shallow(m.data);
+              if ((_a = mm[3]) == null ? void 0 : _a[0])
+                return u8str(mm[3][0].data) == loc2;
+              if (((_b = mm[2]) == null ? void 0 : _b[0]) && u8str(mm[2][0].data) == loc2)
+                return true;
+              return false;
+            });
+            var parent = parse_shallow(mlist[3][parentidx].data);
+            if (!parent[6])
+              parent[6] = [];
+            parent[6].push({
+              type: 2,
+              data: write_shallow([
+                [],
+                [{ type: 0, data: write_varint49(rtpaid) }]
+              ])
+            });
+            mlist[3][parentidx].data = write_shallow(parent);
+            loc2 = deps[rtpaid].location.replace(/^Root Entry\//, "").replace(/^Index\//, "").replace(/\.iwa$/, "");
+            parentidx = mlist[3].findIndex(function(m) {
+              var _a, _b;
+              var mm = parse_shallow(m.data);
+              if ((_a = mm[3]) == null ? void 0 : _a[0])
+                return u8str(mm[3][0].data) == loc2;
+              if (((_b = mm[2]) == null ? void 0 : _b[0]) && u8str(mm[2][0].data) == loc2)
+                return true;
+              return false;
+            });
+            parent = parse_shallow(mlist[3][parentidx].data);
+            if (!parent[6])
+              parent[6] = [];
+            parent[6].push({
+              type: 2,
+              data: write_shallow([
+                [],
+                [{ type: 0, data: write_varint49(tswpsaid) }]
+              ])
+            });
+            mlist[3][parentidx].data = write_shallow(parent);
+            loc2 = deps[tswpsaid].location.replace(/^Root Entry\//, "").replace(/^Index\//, "").replace(/\.iwa$/, "");
+            parentidx = mlist[3].findIndex(function(m) {
+              var _a, _b;
+              var mm = parse_shallow(m.data);
+              if ((_a = mm[3]) == null ? void 0 : _a[0])
+                return u8str(mm[3][0].data) == loc2;
+              if (((_b = mm[2]) == null ? void 0 : _b[0]) && u8str(mm[2][0].data) == loc2)
+                return true;
+              return false;
+            });
+            parent = parse_shallow(mlist[3][parentidx].data);
+            if (!parent[6])
+              parent[6] = [];
+            tswpsarefs.forEach(function(id) {
+              return parent[6].push({
+                type: 2,
+                data: write_shallow([
+                  [],
+                  [{ type: 0, data: write_varint49(id) }]
+                ])
+              });
+            });
+            style_indices.forEach(function(n) {
+              return parent[6].push({
+                type: 2,
+                data: write_shallow([
+                  [],
+                  [{ type: 0, data: write_varint49(n) }]
+                ])
+              });
+            });
+            mlist[3][parentidx].data = write_shallow(parent);
+            ai.messages[0].data = write_shallow(mlist);
+          });
+        });
+        rsstroot.messages[0].data = write_shallow(rsstdata);
       });
     }
     pb[4][0].data = write_shallow(store);
