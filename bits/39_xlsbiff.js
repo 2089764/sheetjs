@@ -752,20 +752,33 @@ function parse_MTRSettings(blob) {
 	return [fMTREnabled, fUserSetThreadCount, cUserThreadCount];
 }
 
-/* [MS-XLS] 2.5.186 TODO: BIFF5 */
+/* [MS-XLS] 2.5.186 */
 function parse_NoteSh(blob, length, opts) {
-	if(opts.biff < 8) return;
 	var row = blob.read_shift(2), col = blob.read_shift(2);
 	var flags = blob.read_shift(2), idObj = blob.read_shift(2);
 	var stAuthor = parse_XLUnicodeString2(blob, 0, opts);
-	if(opts.biff < 8) blob.read_shift(1);
 	return [{r:row,c:col}, stAuthor, idObj, flags];
 }
 
 /* [MS-XLS] 2.4.179 */
 function parse_Note(blob, length, opts) {
+	if(opts && (opts.biff < 8)) {
+		var row = blob.read_shift(2), col = blob.read_shift(2);
+		if(row == 0xFFFF || row == -1) return; // TODO: test continuation
+		var cch = blob.read_shift(2);
+		var cmnt = blob.read_shift(Math.min(cch,2048), 'cpstr');
+		return [{r:row, c:col}, cmnt];
+	}
 	/* TODO: Support revisions */
 	return parse_NoteSh(blob, length, opts);
+}
+function write_NOTE_BIFF2(text/*:string*/, R/*:number*/, C/*:number*/, len/*?:number*/) {
+	var o = new_buf(6 + (len || text.length));
+	o.write_shift(2, R);
+	o.write_shift(2, C);
+	o.write_shift(2, len || text.length);
+	o.write_shift(text.length, text, "sbcs");
+	return o;
 }
 
 /* [MS-XLS] 2.4.168 */

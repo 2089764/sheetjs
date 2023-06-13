@@ -405,6 +405,8 @@ var SYLK = /*#__PURE__*/(function() {
 	var sylk_char_fn = function(_, $1){ var o = sylk_escapes[$1]; return typeof o == "number" ? _getansi(o) : o; };
 	var decode_sylk_char = function($$, $1, $2) { var newcc = (($1.charCodeAt(0) - 0x20)<<4) | ($2.charCodeAt(0) - 0x30); return newcc == 59 ? $$ : _getansi(newcc); };
 	sylk_escapes["|"] = 254;
+	/* TODO: evert the escape map */
+	var encode_sylk_str = function($$) { return $$.replace(/\n/g, "\x1b :").replace(/\r/g, "\x1b ="); };
 	/* https://oss.sheetjs.com/notes/sylk/ for more details */
 	function sylk_to_aoa(d/*:RawData*/, opts)/*:[AOA, Worksheet]*/ {
 		switch(opts.type) {
@@ -457,8 +459,9 @@ var SYLK = /*#__PURE__*/(function() {
 			// case 'NU': // ??
 			case 'C': /* cell */
 			var C_seen_K = false, C_seen_X = false, C_seen_S = false, C_seen_E = false, _R = -1, _C = -1, formula = "", cell_t = "z";
+			var cmnt = "";
 			for(rj=1; rj<record.length; ++rj) switch(record[rj].charAt(0)) {
-				case 'A': break; // TODO: comment
+				case 'A': cmnt = record[rj].slice(1); break; // TODO: comment
 				case 'X': C = parseInt(record[rj].slice(1), 10)-1; C_seen_X = true; break;
 				case 'Y':
 					R = parseInt(record[rj].slice(1), 10)-1; if(!C_seen_X) C = 0;
@@ -508,6 +511,10 @@ var SYLK = /*#__PURE__*/(function() {
 			if(formula) {
 				if(!arr[R][C]) arr[R][C] = { t: 'n', f: formula };
 				else arr[R][C].f = formula;
+			}
+			if(cmnt) {
+				if(!arr[R][C]) arr[R][C] = { t: 'z' };
+				arr[R][C].c = [{a:"SheetJSYLK", t: cmnt}];
 			}
 			break;
 			case 'F': /* Format */
@@ -584,6 +591,13 @@ var SYLK = /*#__PURE__*/(function() {
 		return o;
 	}
 
+	function write_ws_cmnt_sylk(cmnt/*:Comment*/, R/*:number*/, C/*:number*/)/*:string*/ {
+		var o = "C;Y" + (R+1) + ";X" + (C+1) + ";A";
+		/* TODO: max length? */
+		o += encode_sylk_str(cmnt.map(function(c) { return c.t; }).join(""));
+		return o;
+	}
+
 	function write_ws_cols_sylk(out, cols) {
 		cols.forEach(function(col, i) {
 			var rec = "F;W" + (i+1) + " " + (i+1) + " ";
@@ -622,6 +636,17 @@ var SYLK = /*#__PURE__*/(function() {
 
 		preamble.push("B;Y" + (r.e.r - r.s.r + 1) + ";X" + (r.e.c - r.s.c + 1) + ";D" + [r.s.c,r.s.r,r.e.c,r.e.r].join(" "));
 		preamble.push("O;L;D;B" + (d1904 ? ";V4" : "") + ";K47;G100 0.001");
+		/* Excel has been inconsistent in comment placement,  */
+		for(var R = r.s.r; R <= r.e.r; ++R) {
+			if(dense && !ws["!data"][R]) continue;
+			var p = [];
+			for(var C = r.s.c; C <= r.e.c; ++C) {
+				cell = dense ? ws["!data"][R][C] : ws[encode_col(C) + encode_row(R)];
+				if(!cell || !cell.c) continue;
+				p.push(write_ws_cmnt_sylk(cell.c, R, C)); // TODO: pass date1904 info
+			}
+			o.push(p.join(RS));
+		}
 		for(var R = r.s.r; R <= r.e.r; ++R) {
 			if(dense && !ws["!data"][R]) continue;
 			var p = [];

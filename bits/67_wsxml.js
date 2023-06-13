@@ -75,6 +75,9 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
 
+	/* legacyDrawing */
+	if((m = data2.match(/legacyDrawing r:id="(.*?)"/))) s['!legrel'] = m[1];
+
 	if(opts && opts.nodim) refguess.s.c = refguess.s.r = 0;
 	if(!s["!ref"] && refguess.e.c >= refguess.s.c && refguess.e.r >= refguess.s.r) s["!ref"] = encode_range(refguess);
 	if(opts.sheetRows > 0 && s["!ref"]) {
@@ -91,6 +94,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	}
 	if(columns.length > 0) s["!cols"] = columns;
 	if(merges.length > 0) s["!merges"] = merges;
+	if(rels['!id'][s['!legrel']]) s['!legdrawel'] = rels['!id'][s['!legrel']];
 	return s;
 }
 
@@ -395,19 +399,27 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 
 			if((cref=d.match(match_v))!= null && /*::cref != null && */cref[1] !== '') p.v=unescapexml(cref[1]);
 			if(opts.cellFormula) {
-				if((cref=d.match(match_f))!= null && /*::cref != null && */cref[1] !== '') {
-					/* TODO: match against XLSXFutureFunctions */
-					p.f=unescapexml(utf8read(cref[1]), true);
-					if(!opts.xlfn) p.f = _xlfn(p.f);
-					if(/*::cref != null && cref[0] != null && */cref[0].indexOf('t="array"') > -1) {
-						p.F = (d.match(refregex)||[])[1];
-						if(p.F.indexOf(":") > -1) arrayf.push([safe_decode_range(p.F), p.F]);
-					} else if(/*::cref != null && cref[0] != null && */cref[0].indexOf('t="shared"') > -1) {
-						// TODO: parse formula
-						ftag = parsexmltag(cref[0]);
-						var ___f = unescapexml(utf8read(cref[1]));
-						if(!opts.xlfn) ___f = _xlfn(___f);
-						sharedf[parseInt(ftag.si, 10)] = [ftag, ___f, tag.r];
+				if((cref=d.match(match_f))!= null /*:: && cref != null*/) {
+					if(cref[1] == "") {
+						if(/*::cref != null && cref[0] != null && */cref[0].indexOf('t="shared"') > -1) {
+							// TODO: parse formula
+							ftag = parsexmltag(cref[0]);
+							if(sharedf[ftag.si]) p.f = shift_formula_xlsx(sharedf[ftag.si][1], sharedf[ftag.si][2]/*[0].ref*/, tag.r);
+						}
+					} else {
+						/* TODO: match against XLSXFutureFunctions */
+						p.f=unescapexml(utf8read(cref[1]), true);
+						if(!opts.xlfn) p.f = _xlfn(p.f);
+						if(/*::cref != null && cref[0] != null && */cref[0].indexOf('t="array"') > -1) {
+							p.F = (d.match(refregex)||[])[1];
+							if(p.F.indexOf(":") > -1) arrayf.push([safe_decode_range(p.F), p.F]);
+						} else if(/*::cref != null && cref[0] != null && */cref[0].indexOf('t="shared"') > -1) {
+							// TODO: parse formula
+							ftag = parsexmltag(cref[0]);
+							var ___f = unescapexml(utf8read(cref[1]));
+							if(!opts.xlfn) ___f = _xlfn(___f);
+							sharedf[parseInt(ftag.si, 10)] = [ftag, ___f, tag.r];
+						}
 					}
 				} else if((cref=d.match(/<f[^>]*\/>/))) {
 					ftag = parsexmltag(cref[0]);

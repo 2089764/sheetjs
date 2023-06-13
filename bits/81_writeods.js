@@ -204,7 +204,6 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 	};
 
 	var null_cell_xml = '          <table:table-cell />\n';
-	var covered_cell_xml = '          <table:covered-table-cell/>\n';
 	var write_ws = function(ws, wb/*:Workbook*/, i/*:number*/, opts, nfs)/*:string*/ {
 		/* Section 9 Tables */
 		var o/*:Array<string>*/ = [];
@@ -236,7 +235,7 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 					ct['table:number-rows-spanned'] =    (marr[mi].e.r - marr[mi].s.r + 1);
 					break;
 				}
-				if(skip) { o.push(covered_cell_xml); continue; }
+				if(skip) { o.push('          <table:covered-table-cell/>\n'); continue; }
 				var ref = encode_cell({r:R, c:C}), cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 				if(cell && cell.f) {
 					ct['table:formula'] = escapexml(csf_to_ods_formula(cell.f));
@@ -270,8 +269,8 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 						ct['office:date-value'] = (parseDate(cell.v).toISOString());
 						ct['table:style-name'] = "ce1";
 						break;
-					//case 'e':
-					default: o.push(null_cell_xml); continue;
+					//case 'e': // TODO: translate to ODS errors
+					default: o.push(null_cell_xml); continue; // TODO: empty cell with comments
 				}
 				var text_p = write_text_p(textp);
 				if(cell.l && cell.l.Target) {
@@ -282,7 +281,17 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 					text_p = writextag('text:a', text_p, {'xlink:href': _tgt.replace(/&/g, "&amp;")});
 				}
 				if(nfs[cell.z]) ct["table:style-name"] = "ce" + nfs[cell.z].slice(1);
-				o.push('          ' + writextag('table:table-cell', writextag('text:p', text_p, {}), ct) + '\n');
+				var payload = writextag('text:p', text_p, {});
+				if(cell.c) {
+					var acreator = "", apayload = "", aprops = {};
+					for(var ci = 0; ci < cell.c.length; ++ci) {
+						if(!acreator && cell.c[ci].a) acreator = cell.c[ci].a;
+						apayload += "<text:p>" + write_text_p(cell.c[ci].t) + "</text:p>";
+					}
+					if(!cell.c.hidden) aprops["office:display"] = true;
+					payload = writextag('office:annotation', apayload, aprops) + payload;
+				}
+				o.push('          ' + writextag('table:table-cell', payload, ct) + '\n');
 			}
 			o.push('        </table:table-row>\n');
 		}

@@ -520,9 +520,8 @@ function parse_workbook(blob, options/*:ParseOpts*/)/*:Workbook*/ {
 							}
 				} break;
 				case 0x001c /* Note */: {
-					if(opts.biff <= 5 && opts.biff >= 2) break; /* TODO: BIFF5 */
+					/* TODO: comment continuation (row == -1 / 0xFFFF) */
 					cc = options.dense ? (out["!data"][val[0].r]||[])[val[0].c] : out[encode_cell(val[0])];
-					var noteobj = objects[val[2]];
 					if(!cc) {
 						if(options.dense) {
 							if(!out["!data"][val[0].r]) out["!data"][val[0].r] = [];
@@ -536,7 +535,12 @@ function parse_workbook(blob, options/*:ParseOpts*/)/*:Workbook*/ {
 						range.s.c = Math.min(range.s.c, val[0].c);
 					}
 					if(!cc.c) cc.c = [];
-					cmnt = {a:val[1],t:noteobj.TxO.t};
+					if(opts.biff <= 5 && opts.biff >= 2) cmnt = {a:"SheetJ5", t:val[1]};
+					else {
+						var noteobj = objects[val[2]];
+						cmnt = {a:val[1],t:noteobj.TxO.t};
+						if(val[3] != null && !(val[3] & 0x02)) cc.c.hidden = true;
+					}
 					cc.c.push(cmnt);
 				} break;
 				case 0x087d /* XFExt */: update_xfext(XFs[val.ixfe], val.ext); break;

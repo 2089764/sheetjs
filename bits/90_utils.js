@@ -15,7 +15,7 @@ function make_json_row(sheet/*:Worksheet*/, r/*:Range*/, R/*:number*/, cols/*:Ar
 	}
 	if(!dense || sheet["!data"][R]) for (var C = r.s.c; C <= r.e.c; ++C) {
 		var val = dense ? (sheet["!data"][R]||[])[C] : sheet[cols[C] + rr];
-		if(val === undefined || val.t === undefined) {
+		if(val == null || val.t === undefined) {
 			if(defval === undefined) continue;
 			if(hdr[C] != null) { row[hdr[C]] = defval; }
 			continue;

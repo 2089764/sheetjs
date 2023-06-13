@@ -129,8 +129,18 @@ function cc2str(arr/*:Array<number>*/, debomit)/*:string*/ {
 		return new TextDecoder("latin1").decode(arr).replace(/[€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, function(c) { return rev[c] || c; });
 	} catch(e) {}
 
-	var o = [];
-	for(var i = 0; i != arr.length; ++i) o.push(String.fromCharCode(arr[i]));
+	var o = [], i = 0;
+	// this cascade is for the browsers and runtimes of antiquity (and for modern runtimes that lack TextEncoder)
+	try {
+		for(i = 0; i < arr.length - 65536; i+=65536) o.push(String.fromCharCode.apply(0, arr.slice(i, i + 65536)));
+		o.push(String.fromCharCode.apply(0, arr.slice(i)));
+	} catch(e) { try {
+			for(; i < arr.length - 16384; i+=16384) o.push(String.fromCharCode.apply(0, arr.slice(i, i + 16384)));
+			o.push(String.fromCharCode.apply(0, arr.slice(i)));
+		} catch(e) {
+			for(; i != arr.length; ++i) o.push(String.fromCharCode(arr[i]));
+		}
+	}
 	return o.join("");
 }
 

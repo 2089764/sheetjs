@@ -443,6 +443,7 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 			} else {
 				state.push([Rn[3], false]);
 				tmp = xlml_parsexmltag(Rn[0]);
+				if(!parsexmlbool(tmp["ShowAlways"]||"0")) comments.hidden = true;
 				comment = ({a:tmp.Author}/*:any*/);
 			}
 			break;
@@ -534,6 +535,9 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 						/*:: if(!Workbook.WBProps) Workbook.WBProps = {}; */
 						Workbook.WBProps.date1904 = true;
 						break;
+					case 'hidehorizontalscrollbar' /*case 'HideHorizontalScrollBar'*/: break;
+					case 'hideverticalscrollbar' /*case 'HideVerticalScrollBar'*/: break;
+					case 'hideworkbooktabs' /*case 'HideWorkbookTabs'*/: break;
 					case 'windowheight' /*case 'WindowHeight'*/: break;
 					case 'windowwidth' /*case 'WindowWidth'*/: break;
 					case 'windowtopx' /*case 'WindowTopX'*/: break;
@@ -1102,11 +1106,15 @@ function write_ws_xlml_wsopts(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workb
 	return writextag("WorksheetOptions", o.join(""), {xmlns:XLMLNS.x});
 }
 function write_ws_xlml_comment(comments/*:Array<any>*/)/*:string*/ {
+	/* TODO: test multiple comments */
 	return comments.map(function(c) {
 		// TODO: formatted text
 		var t = xlml_unfixstr(c.t||"");
 		var d =writextag("ss:Data", t, {"xmlns":"http://www.w3.org/TR/REC-html40"});
-		return writextag("Comment", d, {"ss:Author":c.a});
+		var p = {};
+		if(c.a) p["ss:Author"] = c.a;
+		if(!comments.hidden) p["ss:ShowAlways"] = "1";
+		return writextag("Comment", d, p);
 	}).join("");
 }
 function write_ws_xlml_cell(cell, ref/*:string*/, ws, opts, idx/*:number*/, wb, addr)/*:string*/{

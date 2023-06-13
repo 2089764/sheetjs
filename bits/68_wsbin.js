@@ -686,6 +686,10 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				}
 				break;
 
+			case 0x0227: /* 'BrtLegacyDrawing' */
+				if(val) s["!legrel"] = val;
+				break;
+
 			case 0x00A1: /* 'BrtBeginAFilter' */
 				s['!autofilter'] = { ref:encode_range(val) };
 				break;
@@ -742,7 +746,6 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 			case 0x0499: /* 'BrtFilter14' */
 			case 0x00A9: /* 'BrtIconFilter' */
 			case 0x049D: /* 'BrtIconFilter14' */
-			case 0x0227: /* 'BrtLegacyDrawing' */
 			case 0x0228: /* 'BrtLegacyDrawingHF' */
 			case 0x0295: /* 'BrtListPart' */
 			case 0x027F: /* 'BrtOleObject' */
@@ -801,6 +804,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 	if(merges.length > 0) s["!merges"] = merges;
 	if(colinfo.length > 0) s["!cols"] = colinfo;
 	if(rowinfo.length > 0) s["!rows"] = rowinfo;
+	if(rels['!id'][s['!legrel']]) s['!legdrawel'] = rels['!id'][s['!legrel']];
 	return s;
 }
 

@@ -13,6 +13,13 @@ function safe_parse_wbrels(wbrels, sheets) {
 	return !wbrels || wbrels.length === 0 ? null : wbrels;
 }
 
+function parse_sheet_legacy_drawing(sheet, type, zip, path, idx, opts, wb, comments) {
+	if(!sheet || !sheet['!legdrawel']) return;
+	var dfile = resolve_path(sheet['!legdrawel'].Target, path);
+	var draw = getzipstr(zip, dfile, true);
+	if(draw) parse_vml(utf8read(draw), sheet, comments||[]);
+}
+
 function safe_parse_sheet(zip, path/*:string*/, relsPath/*:string*/, sheet, idx/*:number*/, sheetRels, sheets, stype/*:string*/, opts, wb, themes, styles) {
 	try {
 		sheetRels[sheet]=parse_rels(getzipstr(zip, relsPath, true), path);
@@ -51,6 +58,7 @@ function safe_parse_sheet(zip, path/*:string*/, relsPath/*:string*/, sheet, idx/
 			}
 		});
 		if(tcomments && tcomments.length) sheet_insert_comments(_ws, tcomments, true, opts.people || []);
+		parse_sheet_legacy_drawing(_ws, stype, zip, path, idx, opts, wb, comments);
 	} catch(e) { if(opts.WTF) throw e; }
 }
 

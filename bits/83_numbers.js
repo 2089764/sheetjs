@@ -450,7 +450,7 @@ function compress_iwa_file(buf) {
   return u8concat(out);
 }
 var numbers_lut_new = function() {
-  return { sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [] };
+  return { sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [], cmnt: [] };
 };
 function numbers_format_cell(cell, t, flags, ofmt, nfmt) {
   var _a, _b, _c, _d;
@@ -684,7 +684,8 @@ function parse_new_storage(buf, lut) {
   var t = buf[1];
   switch (t) {
     case 0:
-      return void 0;
+      ret = { t: "z" };
+      break;
     case 2:
       ret = { t: "n", v: d128 };
       break;
@@ -725,6 +726,12 @@ function parse_new_storage(buf, lut) {
     if (zidx == -1)
       zidx = dv.getUint32(doff, true);
     doff += 4;
+  }
+  if (fields & 524288) {
+    var cmntidx = dv.getUint32(doff, true);
+    doff += 4;
+    if (lut.cmnt[cmntidx])
+      ret.c = iwa_to_s5s_comment(lut.cmnt[cmntidx]);
   }
   if (zidx > -1)
     numbers_format_cell(ret, t | 5 << 8, fields >> 13, lut.ofmt[zidx], lut.nfmt[zidx]);
@@ -927,6 +934,12 @@ function parse_TST_TableDataList(M, root) {
       case 3:
         data[key] = parse_shallow(le[5][0].data);
         break;
+      case 10:
+        {
+          var cs = M[parse_TSP_Reference(le[10][0].data)][0];
+          data[key] = parse_TSD_CommentStorageArchive(M, cs.data);
+        }
+        break;
       default:
         throw type;
     }
@@ -992,8 +1005,38 @@ function parse_TST_Tile(M, root) {
     }, [])
   };
 }
+function parse_TSD_CommentStorageArchive(M, data) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  var out = { t: "", a: "" };
+  var csp = parse_shallow(data);
+  if ((_b = (_a = csp == null ? void 0 : csp[1]) == null ? void 0 : _a[0]) == null ? void 0 : _b.data)
+    out.t = u8str((_d = (_c = csp == null ? void 0 : csp[1]) == null ? void 0 : _c[0]) == null ? void 0 : _d.data) || "";
+  if ((_f = (_e = csp == null ? void 0 : csp[3]) == null ? void 0 : _e[0]) == null ? void 0 : _f.data) {
+    var as = M[parse_TSP_Reference((_h = (_g = csp == null ? void 0 : csp[3]) == null ? void 0 : _g[0]) == null ? void 0 : _h.data)][0];
+    var asp = parse_shallow(as.data);
+    if ((_j = (_i = asp[1]) == null ? void 0 : _i[0]) == null ? void 0 : _j.data)
+      out.a = u8str(asp[1][0].data);
+  }
+  if (csp == null ? void 0 : csp[4]) {
+    out.replies = [];
+    csp[4].forEach(function(pi) {
+      var cs = M[parse_TSP_Reference(pi.data)][0];
+      out.replies.push(parse_TSD_CommentStorageArchive(M, cs.data));
+    });
+  }
+  return out;
+}
+function iwa_to_s5s_comment(iwa) {
+  var out = [];
+  out.push({ t: iwa.t || "", a: iwa.a, T: iwa.replies && iwa.replies.length > 0 });
+  if (iwa.replies)
+    iwa.replies.forEach(function(reply) {
+      out.push({ t: reply.t || "", a: reply.a, T: true });
+    });
+  return out;
+}
 function parse_TST_TableModelArchive(M, root, ws) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
   var pb = parse_shallow(root.data);
   var range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
   range.e.r = (varint_to_i32(pb[6][0].data) >>> 0) - 1;
@@ -1016,7 +1059,9 @@ function parse_TST_TableModelArchive(M, root, ws) {
     lut.ferr = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[12][0].data)][0]);
   if ((_e = store[17]) == null ? void 0 : _e[0])
     lut.rsst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[17][0].data)][0]);
-  if ((_f = store[22]) == null ? void 0 : _f[0])
+  if ((_f = store[19]) == null ? void 0 : _f[0])
+    lut.cmnt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[19][0].data)][0]);
+  if ((_g = store[22]) == null ? void 0 : _g[0])
     lut.nfmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[22][0].data)][0]);
   var tile = parse_shallow(store[3][0].data);
   var _R = 0;
@@ -1043,12 +1088,12 @@ function parse_TST_TableModelArchive(M, root, ws) {
     });
     _R += _tile.nrows;
   });
-  if ((_g = store[13]) == null ? void 0 : _g[0]) {
+  if ((_h = store[13]) == null ? void 0 : _h[0]) {
     var ref = M[parse_TSP_Reference(store[13][0].data)][0];
     var mtype = varint_to_i32(ref.meta[1][0].data);
     if (mtype != 6144)
       throw new Error("Expected merge type 6144, found ".concat(mtype));
-    ws["!merges"] = (_h = parse_shallow(ref.data)) == null ? void 0 : _h[1].map(function(pi) {
+    ws["!merges"] = (_i = parse_shallow(ref.data)) == null ? void 0 : _i[1].map(function(pi) {
       var merge = parse_shallow(pi.data);
       var origin = u8_to_dataview(parse_shallow(merge[1][0].data)[1][0].data), size = u8_to_dataview(parse_shallow(merge[2][0].data)[1][0].data);
       return {

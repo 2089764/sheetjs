@@ -482,7 +482,7 @@ var XLSBRecordEnum = {
 	/*::[*/0x0224/*::]*/: { /* n:"BrtFileSharing" */ },
 	/*::[*/0x0225/*::]*/: { /* n:"BrtOleSize" */ },
 	/*::[*/0x0226/*::]*/: { /* n:"BrtDrawing", */ f:parse_RelID },
-	/*::[*/0x0227/*::]*/: { /* n:"BrtLegacyDrawing" */ },
+	/*::[*/0x0227/*::]*/: { /* n:"BrtLegacyDrawing", */ f:parse_XLNullableWideString },
 	/*::[*/0x0228/*::]*/: { /* n:"BrtLegacyDrawingHF" */ },
 	/*::[*/0x0229/*::]*/: { /* n:"BrtWebOpt" */ },
 	/*::[*/0x022A/*::]*/: { /* n:"BrtBeginWebPubItems", */ T:1 },
@@ -1233,30 +1233,30 @@ var XLSRecordEnum = {
 	/*::[*/0x0021/*::]*/: { /* n:"Array", */ f:parse_Array },
 	/*::[*/0x0024/*::]*/: { /* n:"COLWIDTH", */ },
 	/*::[*/0x0025/*::]*/: { /* n:"DefaultRowHeight", */ f:parse_DefaultRowHeight },
-	// 0x2c ??
-	// 0x2d ??
-	// 0x2e ??
-	// 0x30 FONTCOUNT: number of fonts
+	// 0x002c ??
+	// 0x002d ??
+	// 0x002e ??
+	// 0x0030 FONTCOUNT: number of fonts
 	/*::[*/0x0032/*::]*/: { /* n:"BIFF2FONTXTRA", */ f:parse_BIFF2FONTXTRA },
-	// 0x35: INFOOPTS
-	// 0x36: TABLE (BIFF2 only)
-	// 0x37: TABLE2 (BIFF2 only)
-	// 0x38: WNDESK
-	// 0x39 ??
-	// 0x3a: BEGINPREF
-	// 0x3b: ENDPREF
+	// 0x0035: INFOOPTS
+	// 0x0036: TABLE (BIFF2 only)
+	// 0x0037: TABLE2 (BIFF2 only)
+	// 0x0038: WNDESK
+	// 0x0039 ??
+	// 0x003a: BEGINPREF
+	// 0x003b: ENDPREF
 	/*::[*/0x003e/*::]*/: { /* n:"BIFF2WINDOW2", */ },
-	// 0x3f ??
-	// 0x46: SHOWSCROLL
-	// 0x47: SHOWFORMULA
-	// 0x48: STATUSBAR
-	// 0x49: SHORTMENUS
-	// 0x4A:
-	// 0x4B:
-	// 0x4C:
-	// 0x4E:
-	// 0x4F:
-	// 0x58: TOOLBAR (BIFF3)
+	// 0x003f ??
+	// 0x0046: SHOWSCROLL
+	// 0x0047: SHOWFORMULA
+	// 0x0048: STATUSBAR
+	// 0x0049: SHORTMENUS
+	// 0x004A:
+	// 0x004B:
+	// 0x004C:
+	// 0x004E:
+	// 0x004F:
+	// 0x0058: TOOLBAR (BIFF3)
 
 	/* - - - */
 	/*::[*/0x0034/*::]*/: { /* n:"DDEObjName", */ },

@@ -3,7 +3,7 @@
 
 /* these are type imports and do not show up in the generated JS */
 import { CFB$Container, CFB$Entry } from 'cfb';
-import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions, DenseWorkSheet } from '../';
+import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions, DenseWorkSheet, Comments } from '../';
 import type { utils } from "../";
 
 declare var encode_col: typeof utils.encode_col;
@@ -389,6 +389,14 @@ interface RichText {
 	l?: string;
 }
 
+/** IWA tree-style comment */
+interface IWAComment {
+	/** text */
+	t?: string;
+	/** author */
+	a?: string;
+	replies?: IWAComment[];
+}
 /** .TST.DataStore */
 interface DataLUT {
 	/** shared string table */
@@ -403,8 +411,10 @@ interface DataLUT {
 	fmla: ProtoMessage[];
 	/** formula errors */
 	ferr: ProtoMessage[];
+	/** comment table */
+	cmnt: IWAComment[];
 }
-var numbers_lut_new = (): DataLUT => ({ sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [] });
+var numbers_lut_new = (): DataLUT => ({ sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [], cmnt: [] });
 
 function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: ProtoMessage, nfmt: ProtoMessage): void {
 	var ctype = t & 0xFF, ver = t >> 8;
@@ -552,7 +562,7 @@ function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 	var ret: CellObject;
 	var t = buf[1];
 	switch(t) {
-		case  0: return void 0; // return { t: "z" }; // blank?
+		case  0: ret = { t: "z" }; break;
 		case  2: ret = { t: "n", v: d128 }; break; // number
 		case  3: ret = { t: "s", v: lut.sst[sidx] }; break; // string
 		case  5: ret = { t: "d", v: dt }; break; // date-time
@@ -578,6 +588,10 @@ function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 	if(fields & 0x07E000) { if(zidx == -1) zidx = dv.getUint32(doff, true); doff += 4; }
 
 	//          0x080000 comment
+	if(fields & 0x080000) {
+		var cmntidx = dv.getUint32(doff, true); doff += 4;
+		if(lut.cmnt[cmntidx]) ret.c = iwa_to_s5s_comment(lut.cmnt[cmntidx]);
+	}
 	//          0x100000 warning
 
 	if(zidx > -1) numbers_format_cell(ret, t | (5<<8), fields >> 13, lut.ofmt[zidx], lut.nfmt[zidx] );
@@ -736,6 +750,11 @@ function parse_TST_TableDataList(M: MessageSpace, root: IWAMessage): any[] {
 			} break;
 			case 2: data[key] = parse_shallow(le[6][0].data); break;
 			case 3: data[key] = parse_shallow(le[5][0].data); break;
+			case 10: {
+				// .TSD.CommentStorageArchive
+				var cs = M[parse_TSP_Reference(le[10][0].data)][0];
+				data[key] = parse_TSD_CommentStorageArchive(M, cs.data);
+			} break;
 			default: throw type;
 		}
 	});
@@ -804,6 +823,37 @@ function parse_TST_Tile(M: MessageSpace, root: IWAMessage): TileInfo {
 	};
 }
 
+/** Parse .TSD.CommentStorageArchive (3056) */
+function parse_TSD_CommentStorageArchive(M: MessageSpace, data: Uint8Array): IWAComment {
+	var out: IWAComment = { t: "", a: ""};
+	var csp = parse_shallow(data);
+	if(csp?.[1]?.[0]?.data) out.t = u8str(csp?.[1]?.[0]?.data) || "";
+	if(csp?.[3]?.[0]?.data) {
+		/* .TSK.AnnotationAuthorArchive (212) */
+		var as = M[parse_TSP_Reference(csp?.[3]?.[0]?.data)][0];
+		var asp = parse_shallow(as.data);
+		if(asp[1]?.[0]?.data) out.a = u8str(asp[1][0].data)
+	}
+	if(csp?.[4]) {
+		out.replies = [];
+		csp[4].forEach(pi => {
+			var cs = M[parse_TSP_Reference(pi.data)][0];
+			out.replies!.push(parse_TSD_CommentStorageArchive(M, cs.data));
+		});
+	}
+	return out;
+}
+/** Create SheetJS threaded comment structure from IWA comment */
+function iwa_to_s5s_comment(iwa: IWAComment): Comments {
+	var out: Comments = [];
+	out.push({t: iwa.t||"", a: iwa.a, T: iwa.replies && (iwa.replies.length > 0) });
+	/* TODO: do apps support a tree of replies? */
+	if(iwa.replies) iwa.replies.forEach(reply => {
+		out.push({t: reply.t ||"", a: reply.a, T:true });
+	});
+	return out;
+}
+
 /** Parse .TST.TableModelArchive (6001) */
 function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet) {
 	var pb = parse_shallow(root.data);
@@ -822,6 +872,7 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 	if(store[11]?.[0]) lut.ofmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[11][0].data)][0]);
 	if(store[12]?.[0]) lut.ferr = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[12][0].data)][0]);
 	if(store[17]?.[0]) lut.rsst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[17][0].data)][0]);
+	if(store[19]?.[0]) lut.cmnt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[19][0].data)][0]);
 	if(store[22]?.[0]) lut.nfmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[22][0].data)][0]);
 
 	// .TST.TileStorage

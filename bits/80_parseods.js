@@ -248,8 +248,8 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 		var ws = ({}/*:any*/); if(opts.dense) ws["!data"] = [];
 		var Rn, q/*:: :any = ({t:"", v:null, z:null, w:"",c:[],}:any)*/;
 		var ctag = ({value:""}/*:any*/);
-		var textp = "", textpidx = 0, textptag/*:: = {}*/;
-		var textR = [];
+		var textp = "", textpidx = 0, textptag/*:: = {}*/, oldtextp = "", oldtextpidx = 0;
+		var textR = [], oldtextR = [];
 		var R = -1, C = -1, range = {s: {r:1000000,c:10000000}, e: {r:0, c:0}};
 		var row_ol = 0;
 		var number_format_map = _nfm || {}, styles = {};
@@ -334,7 +334,7 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 					C+= colpeat-1;
 				} else if(Rn[1]!=='/') {
 					++C;
-					textp = ""; textpidx = 0; textR = [];
+					textp = oldtextp = ""; textpidx = oldtextpidx = 0; textR = []; oldtextR = [];
 					colpeat = 1;
 					var rptR = rowpeat ? R + rowpeat - 1 : R;
 					if(C > range.e.c) range.e.c = C;
@@ -443,10 +443,17 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 					if(textR.length) /*::(*/comment/*:: :any)*/.R = textR;
 					comment.a = creator;
 					comments.push(comment);
+					textp = oldtextp; textpidx = oldtextpidx; textR = oldtextR;
 				}
-				else if(Rn[0].charAt(Rn[0].length-2) !== '/') {state.push([Rn[3], false]);}
+				else if(Rn[0].charAt(Rn[0].length-2) !== '/') {
+					state.push([Rn[3], false]);
+					var annotag = parsexmltag(Rn[0], true);
+					/* office:display TODO: check if there is a global override */
+					if(!(annotag["display"] && parsexmlbool(annotag["display"]))) comments.hidden = true;
+					oldtextp = textp; oldtextpidx = textpidx; oldtextR = textR;
+					textp = ""; textpidx = 0; textR = [];
+				}
 				creator = ""; creatoridx = 0;
-				textp = ""; textpidx = 0; textR = [];
 				break;
 
 			case 'creator': // 4.3.2.7 <dc:creator>

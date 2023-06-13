@@ -35,7 +35,7 @@ function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
 			/*:: declare var chrome: any; */
 			if(typeof chrome === 'object' && typeof (chrome.downloads||{}).download == "function") {
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
-				return chrome.downloads.download({ url: url, filename: fname, saveAs: true});
+				return chrome.downloads.download({ url: url, filename: fname, saveAs: true });
 			}
 			var a = document.createElement("a");
 			if(a.download != null) {
@@ -45,6 +45,10 @@ function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
 				return url;
 			}
+		} else if(typeof URL !== 'undefined' && !URL.createObjectURL && typeof chrome === 'object') {
+			/* manifest v3 extensions -- no URL.createObjectURL */
+			var b64 = "data:application/octet-stream;base64," + Base64_encode_arr(new Uint8Array(blobify(data)));
+			return chrome.downloads.download({ url: b64, filename: fname, saveAs: true });
 		}
 	}
 	// $FlowIgnore
