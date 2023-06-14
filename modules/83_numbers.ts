@@ -11,7 +11,6 @@ declare var encode_row: typeof utils.encode_row;
 declare var encode_range: typeof utils.encode_range;
 declare var book_new: typeof utils.book_new;
 declare var book_append_sheet: typeof utils.book_append_sheet;
-declare var sheet_to_json: typeof utils.sheet_to_json;
 declare var decode_range: typeof utils.decode_range;
 import * as _CFB from 'cfb';
 declare var CFB: typeof _CFB;
@@ -600,51 +599,72 @@ function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 }
 
 /** Write a cell "new storage" (version 5) */
-function write_new_storage(cell: CellObject, sst: string[], rsst: RichText[]): Uint8Array {
-	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
+function write_new_storage(cell: CellObject, lut: DataLUT): Uint8Array {
+	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
 	out[0] = 5;
 	switch(cell.t) {
-		case "n": out[1] = 2; writeDecimal128LE(out, l, cell.v as number); flags |= 1; l += 16; break;
-		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); flags |= 2; l += 8; break;
+		case "n": out[1] = 2; writeDecimal128LE(out, l, cell.v as number); fields |= 1; l += 16; break;
+		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 2; l += 8; break;
 		case "s": {
 			var s = cell.v == null ? "" : String(cell.v);
 			if(cell.l) {
-				var irsst = rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
-				if(irsst == -1) rsst[irsst = rsst.length] = { v: s , l: cell.l.Target };
-				out[1] = 9; dv.setUint32(l, irsst, true); flags |= 0x10; l += 4;
+				var irsst = lut.rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
+				if(irsst == -1) lut.rsst[irsst = lut.rsst.length] = { v: s , l: cell.l.Target };
+				out[1] = 9; dv.setUint32(l, irsst, true); fields |= 0x10; l += 4;
 			} else {
-				var isst = sst.indexOf(s);
-				if(isst == -1) sst[isst = sst.length] = s;
-				out[1] = 3; dv.setUint32(l, isst, true); flags |= 8; l += 4;
+				var isst = lut.sst.indexOf(s);
+				if(isst == -1) lut.sst[isst = lut.sst.length] = s;
+				out[1] = 3; dv.setUint32(l, isst, true); fields |= 8; l += 4;
 			}
 		} break;
+		case "z": out[1] = 0; break;
 		default: throw "unsupported cell type " + cell.t;
 	}
-	dv.setUint32(8, flags, true);
+	if(cell.c) {
+		lut.cmnt.push(s5s_to_iwa_comment(cell.c));
+		dv.setUint32(l, lut.cmnt.length - 1, true); fields |= 0x80000; l += 4;
+	}
+	dv.setUint32(8, fields, true);
 	return out[subarray](0, l);
 }
 /** Write a cell "old storage" (version 4) */
-function write_old_storage(cell: CellObject, sst: string[], rsst: RichText[]): Uint8Array {
-	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
+function write_old_storage(cell: CellObject, lut: DataLUT): Uint8Array {
+	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
 	out[0] = 4;
+	/* note: rich text appears *before* comments */
 	switch(cell.t) {
-		case "n": out[1] = 2; dv.setFloat64(l, cell.v as number, true); flags |= 0x20; l += 8; break;
-		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); flags |= 0x20; l += 8; break;
+		case "n": break;
+		case "b": break;
 		case "s": {
 			var s = cell.v == null ? "" : String(cell.v);
 			if(cell.l) {
-				var irsst = rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
-				if(irsst == -1) rsst[irsst = rsst.length] = { v: s, l: cell.l.Target };
-				out[1] = 9; dv.setUint32(l, irsst, true); flags |= 0x200; l += 4;
-			} else {
-				var isst = sst.indexOf(s);
-				if(isst == -1) sst[isst = sst.length] = s;
-				out[1] = 3; dv.setUint32(l, isst, true); flags |= 0x10; l += 4;
-			}
+				var irsst = lut.rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
+				if(irsst == -1) lut.rsst[irsst = lut.rsst.length] = { v: s, l: cell.l.Target };
+				out[1] = 9; dv.setUint32(l, irsst, true); fields |= 0x200; l += 4;
+			} else { }
 		} break;
+		case "z": break;
 		default: throw "unsupported cell type " + cell.t;
 	}
-	dv.setUint32(8, flags, true);
+	if(cell.c) {
+		/* NOTE: THIS ASSUMES write_new_storage was called */
+		dv.setUint32(l, lut.cmnt.length - 1, true); fields |= 0x1000; l += 4;
+	}
+	switch(cell.t) {
+		case "n": out[1] = 2; dv.setFloat64(l, cell.v as number, true); fields |= 0x20; l += 8; break;
+		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 0x20; l += 8; break;
+		case "s": {
+			var s = cell.v == null ? "" : String(cell.v);
+			if(cell.l) { } else {
+				var isst = lut.sst.indexOf(s);
+				if(isst == -1) lut.sst[isst = lut.sst.length] = s;
+				out[1] = 3; dv.setUint32(l, isst, true); fields |= 0x10; l += 4;
+			}
+		} break;
+		case "z": out[1] = 0; break;
+		default: throw "unsupported cell type " + cell.t;
+	}
+	dv.setUint32(8, fields, true);
 	return out[subarray](0, l);
 }
 //<<export { write_new_storage, write_old_storage };
@@ -669,8 +689,7 @@ function parse_TSP_Reference(buf: Uint8Array): number {
 }
 /** Write .TSP.Reference */
 function write_TSP_Reference(idx: number): Uint8Array {
-	return write_shallow([
-		[],
+	return write_shallow([ [],
 		[ { type: 0, data: write_varint49(idx) } ]
 	]);
 }
@@ -853,6 +872,17 @@ function iwa_to_s5s_comment(iwa: IWAComment): Comments {
 	});
 	return out;
 }
+/** Create IWA comment from SheetJS threaded comment structure */
+function s5s_to_iwa_comment(s5s: Comments): IWAComment {
+	var out: IWAComment = {a: "", t:"", replies:[]};
+	for(var i = 0; i < s5s.length; ++i) {
+		if(i == 0) { out.a = s5s[i].a; out.t = s5s[i].t; }
+		else {
+			out.replies!.push({a: s5s[i].a, t: s5s[i].t});
+		}
+	}
+	return out;
+}
 
 /** Parse .TST.TableModelArchive (6001) */
 function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet) {
@@ -1024,7 +1054,7 @@ interface DependentInfo {
 	type: number;
 }
 /** Write .TST.TileRowInfo */
-function write_TST_TileRowInfo(data: CellObject[], SST: string[], RSST: RichText[], wide: boolean): ProtoMessage {
+function write_TST_TileRowInfo(data: CellObject[], lut: DataLUT, wide: boolean): ProtoMessage {
 	var tri: ProtoMessage = [
 		[],
 		[ { type: 0, data: write_varint49(0) }],
@@ -1056,7 +1086,8 @@ function write_TST_TileRowInfo(data: CellObject[], SST: string[], RSST: RichText
 	var _dv = u8_to_dataview(tri[4][0].data), _last_offset = 0, _cell_storage: Uint8Array[] = [];
 	var width = wide ? 4 : 1;
 	for(var C = 0; C < data.length; ++C) {
-		if(data[C] == null || data[C].t == "z" || data[C].t == "e") { dv.setUint16(C*2, 0xFFFF, true); _dv.setUint16(C*2, 0xFFFF); continue; }
+		/* TODO: serialize errors */
+		if(data[C] == null || (data[C].t == "z" && !data[C].c?.length) || data[C].t == "e") { dv.setUint16(C*2, 0xFFFF, true); _dv.setUint16(C*2, 0xFFFF); continue; }
 		dv.setUint16(C*2, last_offset / width, true);
 		/*if(!wide)*/ _dv.setUint16(C*2, _last_offset / width, true);
 		var celload: Uint8Array, _celload: Uint8Array;
@@ -1064,17 +1095,17 @@ function write_TST_TileRowInfo(data: CellObject[], SST: string[], RSST: RichText
 			case "d":
 				// TODO: write the actual date code
 				if(data[C].v instanceof Date) {
-					celload = write_new_storage({t: "s", v: (data[C].v as Date).toISOString()}, SST, RSST);
-					/*if(!wide)*/ _celload = write_old_storage({t: "s", v: (data[C].v as Date).toISOString()}, SST, RSST);
+					celload = write_new_storage({t: "s", v: (data[C].v as Date).toISOString()}, lut);
+					/*if(!wide)*/ _celload = write_old_storage({t: "s", v: (data[C].v as Date).toISOString()}, lut);
 					break;
 				}
 				/* TODO: can esbuild preserve falls through comments ? */
-				celload = write_new_storage(data[C], SST, RSST);
-				/*if(!wide)*/ _celload = write_old_storage(data[C], SST, RSST);
+				celload = write_new_storage(data[C], lut);
+				/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
 				break;
-			case "s": case "n": case "b":
-				celload = write_new_storage(data[C], SST, RSST);
-				/*if(!wide)*/ _celload = write_old_storage(data[C], SST, RSST);
+			case "s": case "n": case "b": case "z":
+				celload = write_new_storage(data[C], lut);
+				/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
 				break;
 			default:
 				throw new Error("Unsupported value " + data[C]);
@@ -1153,6 +1184,27 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 	return dependents;
 }
 
+/** Generate .TSP.Color from r/g/b (0-255) */
+function write_TSP_Color_RGB(r: number, g: number, b: number): Uint8Array { return write_shallow([[],
+	[{ type: 0, data: write_varint49(1) }],
+	[],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([r/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([g/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([b/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([1]).buffer)}],
+	[], [], [], [], [],
+	[{ type: 0, data: write_varint49(1) }]
+]); }
+
+function get_author_color(n: number): Uint8Array {
+	switch(n) {
+		case 0: return write_TSP_Color_RGB(0x63, 0xDE, 0xAB);
+		case 1: return write_TSP_Color_RGB(0xA2, 0xC5, 0xF0);
+		case 2: return write_TSP_Color_RGB(0xFF, 0xBD, 0xBD);
+	}
+	return write_TSP_Color_RGB(Math.random()*255, Math.random()*255, Math.random()*255);
+}
+
 /** Write NUMBERS workbook */
 function write_numbers_iwa(wb: WorkBook, opts?: WritingOptions): CFB$Container {
 	if(!opts || !opts.numbers) throw new Error("Must pass a `numbers` option -- check the README");
@@ -1198,6 +1250,21 @@ function numbers_iwa_find(cfb: CFB$Container, deps: Dependents, id: number) {
 	return ainfo;
 }
 
+function numbers_add_meta(mlist: ProtoMessage, newid: number, newloc: string) {
+	mlist[3].push({type: 2, data: write_shallow([ [],
+		[{type: 0, data: write_varint49(newid)}],
+		[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
+		[{type: 2, data: stru8(newloc)}],
+		[{type: 2, data: new Uint8Array([2, 0, 0])}],
+		[{type: 2, data: new Uint8Array([2, 0, 0])}],
+		[], [], [], [], // skip fields 6-9
+		[{type: 0, data: write_varint49(0)}],
+		[],
+		[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
+	])});
+	mlist[1] = [{type: 0, data: write_varint49(Math.max(newid + 1, varint_to_i32(mlist[1][0].data) ))}];
+}
+
 function numbers_add_msg(cfb: CFB$Container, type: number, msg: ProtoMessage, path: string, deps: Dependents, id?: number): number {
 	if(!id) id = get_unique_msgid({ deps: [], location: "", type }, deps);
 	var loc = `${path}-${id}.iwa`;
@@ -1209,23 +1276,48 @@ function numbers_add_msg(cfb: CFB$Container, type: number, msg: ProtoMessage, pa
 	var newloc = loc.replace(/^[\/]/, "").replace(/^Index\//, "").replace(/\.iwa$/,"");
 	numbers_iwa_doit(cfb, deps, 2, ai => {
 		var mlist = parse_shallow(ai.messages[0].data);
-
-		mlist[3].push({type: 2, data: write_shallow([ [],
-			[{type: 0, data: write_varint49(id as number)}],
-			[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
-			[{type: 2, data: stru8(newloc)}],
-			[{type: 2, data: new Uint8Array([2, 0, 0])}],
-			[{type: 2, data: new Uint8Array([2, 0, 0])}],
-			[], [], [], [],
-			[{type: 0, data: write_varint49(0)}],
-			[],
-			[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
-		])});
-		mlist[1] = [{type: 0, data: write_varint49(Math.max((id as number) + 1, varint_to_i32(mlist[1][0].data) ))}];
+		numbers_add_meta(mlist, id||0, newloc);
 
 		ai.messages[0].data = write_shallow(mlist);
 	})
 	return id;
+}
+
+/** Add dependency to metadata */
+function numbers_meta_add_dep(mlist: ProtoMessage, deps: Dependents, id: number, dep: number|number[]) {
+	var loc = deps[id].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
+	var parentidx = mlist[3].findIndex(m => {
+		var mm = parse_shallow(m.data);
+		if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
+		if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
+		return false;
+	});
+	var parent = parse_shallow(mlist[3][parentidx].data);
+	if(!parent[6]) parent[6] = [];
+	(Array.isArray(dep) ? dep : [dep]).forEach(dep => {
+		parent[6].push({
+			type: 2,
+			data: write_shallow([ [],
+				[{type: 0, data: write_varint49(dep) }]
+			])
+		});
+	});
+	mlist[3][parentidx].data = write_shallow(parent);
+}
+
+/** Remove dependency from metadata */
+function numbers_meta_del_dep(mlist: ProtoMessage, deps: Dependents, id: number, dep: number|number[]) {
+	var loc = deps[id].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
+	var parentidx = mlist[3].findIndex(m => {
+		var mm = parse_shallow(m.data);
+		if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
+		if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
+		return false;
+	});
+	var parent = parse_shallow(mlist[3][parentidx].data);
+	if(!parent[6]) parent[6] = [];
+	parent[6] = parent[6].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != dep);
+	mlist[3][parentidx].data = write_shallow(parent);
 }
 
 /** Deep copy of the essential parts of a worksheet */
@@ -1277,29 +1369,12 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 		tia.id = tiaref;
 		if(deps[drawables[0]].location == deps[newsheetref].location) arch.push(tia);
 		else {
-			var loc = deps[newsheetref].location;
-			loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-			loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+			/* TODO: there are a number of places that assume the metadata record has ID=2 */
 			numbers_iwa_doit(cfb, deps, 2, (ai => {
 				var mlist = parse_shallow(ai.messages[0].data);
 
 				/* add reference from SheetArchive file to TIA */
-				var parentidx = mlist[3].findIndex(m => {
-					var mm = parse_shallow(m.data);
-					if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-					if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-					return false;
-				});
-				var parent = parse_shallow(mlist[3][parentidx].data);
-				if(!parent[6]) parent[6] = [];
-				parent[6].push({
-					type: 2,
-					data: write_shallow([
-						[],
-						[{type: 0, data: write_varint49(tiaref) }]
-					])
-				});
-				mlist[3][parentidx].data = write_shallow(parent);
+				numbers_meta_add_dep(mlist, deps, newsheetref, tiaref);
 
 				ai.messages[0].data = write_shallow(mlist);
 			}));
@@ -1339,11 +1414,6 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 
 		tiaroot.messages[0].data = write_shallow(tia);
 	});
-
-	/* identifier for finding the TableModelArchive in the archive */
-	var loc = deps[tmaref].location;
-	loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-	loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 	/* .TST.TableModelArchive */
 	numbers_iwa_doit(cfb, deps, tmaref, (tmaroot: IWAArchiveInfo, arch: IWAArchiveInfo[]) => {
@@ -1412,46 +1482,14 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 					if(deps[newref].location == deps[oldref].location) deps[newref].location = deps[newref].location.replace(/\.iwa/, `-${newref}.iwa`);
 					CFB.utils.cfb_add(cfb, deps[newref].location, compress_iwa_file(write_iwa_file([ msg ])));
 
-					var newloc = deps[newref].location;
-					newloc = newloc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-					newloc = newloc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+					var newloc = deps[newref].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 					numbers_iwa_doit(cfb, deps, 2, ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
-						mlist[3].push({type: 2, data: write_shallow([
-							[],
-							[{type: 0, data: write_varint49(newref)}],
-							[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
-							[{type: 2, data: stru8(newloc)}],
-							[{type: 2, data: new Uint8Array([2, 0, 0])}],
-							[{type: 2, data: new Uint8Array([2, 0, 0])}],
-							[],
-							[],
-							[],
-							[],
-							[{type: 0, data: write_varint49(0)}],
-							[],
-							[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
-						])});
-						mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, varint_to_i32(mlist[1][0].data) ))}];
+						numbers_add_meta(mlist, newref, newloc);
 
 						/* add reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([
-								[],
-								[{type: 0, data: write_varint49(newref) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, tmaref, newref);
 
 						ai.messages[0].data = write_shallow(mlist);
 					});
@@ -1477,45 +1515,14 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 						if(deps[newref].location == deps[oldref].location) deps[newref].location = deps[newref].location.replace(/\.iwa/, `-${newref}.iwa`);
 						CFB.utils.cfb_add(cfb, deps[newref].location, compress_iwa_file(write_iwa_file([ msg ])));
 
-						var newloc = deps[newref].location;
-						newloc = newloc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-						newloc = newloc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+						var newloc = deps[newref].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 						numbers_iwa_doit(cfb, deps, 2, (ai => {
 							var mlist = parse_shallow(ai.messages[0].data);
-							mlist[3].push({type: 2, data: write_shallow([ [],
-								[{type: 0, data: write_varint49(newref)}],
-								[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
-								[{type: 2, data: stru8(newloc)}],
-								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[],
-								[],
-								[],
-								[],
-								[{type: 0, data: write_varint49(0)}],
-								[],
-								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
-							])});
-							mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, varint_to_i32(mlist[1][0].data) ))}];
+							numbers_add_meta(mlist, newref, newloc);
 
 							/* add reference from TableModelArchive file to Tile */
-							var parentidx = mlist[3].findIndex(m => {
-								var mm = parse_shallow(m.data);
-								if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-								if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-								return false;
-							});
-							var parent = parse_shallow(mlist[3][parentidx].data);
-							if(!parent[6]) parent[6] = [];
-							parent[6].push({
-								type: 2,
-								data: write_shallow([
-									[],
-									[{type: 0, data: write_varint49(newref) }]
-								])
-							});
-							mlist[3][parentidx].data = write_shallow(parent);
+							numbers_meta_add_dep(mlist, deps, tmaref, newref);
 
 							ai.messages[0].data = write_shallow(mlist);
 						}));
@@ -1552,10 +1559,7 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 								[{type: 2, data: stru8(`Tables/Tile-${newtileref}`)}],
 								[{type: 2, data: new Uint8Array([2, 0, 0])}],
 								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[],
-								[],
-								[],
-								[],
+								[], [], [], [], // skip fields 6-9
 								[{type: 0, data: write_varint49(0)}],
 								[],
 								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
@@ -1563,22 +1567,7 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 							mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileref + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 							/* add reference from TableModelArchive file to Tile */
-							var parentidx = mlist[3].findIndex(m => {
-								var mm = parse_shallow(m.data);
-								if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-								if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-								return false;
-							});
-							var parent = parse_shallow(mlist[3][parentidx].data);
-							if(!parent[6]) parent[6] = [];
-							parent[6].push({
-								type: 2,
-								data: write_shallow([
-									[],
-									[{type: 0, data: write_varint49(newtileref) }]
-								])
-							});
-							mlist[3][parentidx].data = write_shallow(parent);
+							numbers_meta_add_dep(mlist, deps, tmaref, newtileref);
 
 							ai.messages[0].data = write_shallow(mlist);
 						}));
@@ -1648,14 +1637,17 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 				data[R_][_C] = _cell;
 			}
 		}
-	}	sheet_to_json<any>(ws, { range, header: 1 });
-	var SST: string[] = ["~Sh33tJ5~"];
-	var RSST: RichText[] = [{v:"~54ee77S~", l: "https://sheetjs.com/"}];
+	}
+	var LUT: DataLUT = {
+		 cmnt: [{a: "~54ee77S~", t: "... the people who are crazy enough to think they can change the world, are the ones who do."}],
+		 ferr: [],
+		 fmla: [],
+		 nfmt: [],
+		 ofmt: [],
+		 rsst: [{v:"~54ee77S~", l: "https://sheetjs.com/"}],
+		 sst:  ["~Sh33tJ5~"]
+	};
 
-	/* identifier for finding the TableModelArchive in the archive */
-	var loc = deps[tmaref].location;
-	loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-	loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 	var pb = parse_shallow(tmaroot.messages[0].data);
 	{
@@ -1721,23 +1713,15 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 				{
 					CFB.utils.cfb_del(cfb, deps[tileref].location);
 
-					/* remove existing tile from reference -- TODO: can this have an id other than 2? */
+					/* remove existing tile from reference */
 					numbers_iwa_doit(cfb, deps, 2, (ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
 
+						/* remove metadata entry for tile */
 						mlist[3] = mlist[3].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != tileref);
 
 						/* remove reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6] = parent[6].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != tileref);
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_del_dep(mlist, deps, tmaref, tileref);
 
 						ai.messages[0].data = write_shallow(mlist);
 					}));
@@ -1769,7 +1753,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 						[{type: 0, data: write_varint49(USE_WIDE_ROWS ? 1 : 0)}]
 					];
 					for(var R = tidx * tstride; R <= Math.min(range.e.r, (tidx + 1) * tstride - 1); ++R) {
-						var tilerow = write_TST_TileRowInfo(data[R], SST, RSST, USE_WIDE_ROWS);
+						var tilerow = write_TST_TileRowInfo(data[R], LUT, USE_WIDE_ROWS);
 						tilerow[1][0].data = write_varint49(R - tidx * tstride);
 						tiledata[5].push({data: write_shallow(tilerow), type: 2});
 					}
@@ -1788,7 +1772,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var tilecontent = compress_iwa_file(write_iwa_file([newtile]));
 					CFB.utils.cfb_add(cfb, `/Index/Tables/Tile-${newtileid}.iwa`, tilecontent);
 
-					/* update metadata -- TODO: can this have an id other than 2? */
+					/* update metadata */
 					numbers_iwa_doit(cfb, deps, 2, (ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
 						mlist[3].push({type: 2, data: write_shallow([ [],
@@ -1805,21 +1789,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 						mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileid + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 						/* add reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([ [],
-								[{type: 0, data: write_varint49(newtileid) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, tmaref, newtileid);
 
 						ai.messages[0].data = write_shallow(mlist);
 					}));
@@ -1865,22 +1835,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var mlist = parse_shallow(ai.messages[0].data);
 
 					/* add reference from TableModelArchive file to merge */
-					var parentidx = mlist[3].findIndex(m => {
-						var mm = parse_shallow(m.data);
-						if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-						if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-						return false;
-					});
-					var parent = parse_shallow(mlist[3][parentidx].data);
-					if(!parent[6]) parent[6] = [];
-					parent[6].push({
-						type: 2,
-						data: write_shallow([
-							[],
-							[{type: 0, data: write_varint49(mergeid) }]
-						])
-					});
-					mlist[3][parentidx].data = write_shallow(parent);
+					numbers_meta_add_dep(mlist, deps, tmaref, mergeid);
 
 					ai.messages[0].data = write_shallow(mlist);
 				}));
@@ -1896,7 +1851,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 				var sstdata = parse_shallow(sstroot.messages[0].data);
 				{
 					sstdata[3] = [];
-					SST.forEach((str, i) => {
+					LUT.sst.forEach((str, i) => {
 						if(i == 0) return; // Numbers will assert if index zero
 						sstdata[3].push({type: 2, data: write_shallow([ [],
 							[ { type: 0, data: write_varint49(i) } ],
@@ -1923,7 +1878,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					903845  // character style
 				];
 
-				RSST.forEach((rsst, i) => {
+				LUT.rsst.forEach((rsst, i) => {
 					if(i == 0) return;
 
 					/* create .TSWP.StorageArchive (2001) */
@@ -1999,70 +1954,117 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 						var mlist = parse_shallow(ai.messages[0].data);
 
 						/* rsst -> rich text payload */
-						var loc = deps[rsstref].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([ [],
-								[{type: 0, data: write_varint49(rtpaid) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, rsstref, rtpaid);
 
 						/* rich text payload -> storage archive */
-						loc = deps[rtpaid].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
-						parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([ [],
-								[{type: 0, data: write_varint49(tswpsaid) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, rtpaid, tswpsaid);
 
 						/* storage archive -> smart fields */
-						loc = deps[tswpsaid].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
-						parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						tswpsarefs.forEach(id => parent[6].push({
-							type: 2,
-							data: write_shallow([ [],
-								[{type: 0, data: write_varint49(id) }]
-							])
-						}));
-						style_indices.forEach(n => parent[6].push({
-							type: 2,
-							data: write_shallow([ [],
-								[{type: 0, data: write_varint49(n) }]
-							])
-						}));
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, tswpsaid, tswpsarefs);
+						numbers_meta_add_dep(mlist, deps, tswpsaid, style_indices);
 
 						ai.messages[0].data = write_shallow(mlist);
 					});
 				});
 				rsstroot.messages[0].data = write_shallow(rsstdata);
 			});
+
+			/* rebuild comment table */
+			if(LUT.cmnt.length > 1) {
+				/* TODO: verify zahl has a comment storage */
+				var cmntref = parse_TSP_Reference(store[19][0].data);
+				var authors: {[a: string]: number} = {}, iauthor = 0; /* TODO: this should be a Map */
+				numbers_iwa_doit(cfb, deps, cmntref, (cmntroot) => {
+					var cmntdata = parse_shallow(cmntroot.messages[0].data);
+					{
+						cmntdata[3] = [];
+						LUT.cmnt.forEach((cc,i) => {
+							if(i == 0) return;
+							var replies: number[] = [];
+							/* TODO: this assumes one level of replies */
+							if(cc.replies) cc.replies.forEach(c => {
+								/* .TSK.AnnotationAuthorArchive (212) TODO: unify names across book */
+								if(!authors[c.a||""]) authors[c.a||""] = numbers_add_msg(cfb, 212, [ [],
+									[ { type: 2, data: stru8(c.a||"") }],
+									[ { type: 2, data: get_author_color(++iauthor) }],
+									[],
+									[ { type: 0, data: write_varint49(0) } ]
+								], "/Index/Tables/DataList", deps);
+								var aaaid = authors[c.a||""];
+
+								/* .TSD.CommentStorageArchive (3056) */
+								var csaid = numbers_add_msg(cfb, 3056, [ [],
+									[ { type: 2, data: stru8(c.t||"") }],
+									[ { type: 2, data: write_shallow([[],
+										[ { type: 1, data: new Uint8Array([0, 0, 0, 128, 116, 109, 182, 65]) }]
+									]) }],
+									[ { type: 2, data: write_TSP_Reference(aaaid) }]
+								], "/Index/Tables/DataList", deps);
+								numbers_iwa_doit(cfb, deps, csaid, iwa => numbers_add_oref(iwa, aaaid));
+								replies.push(csaid);
+
+								/* meta deps */
+								numbers_iwa_doit(cfb, deps, 2, ai => {
+									var mlist = parse_shallow(ai.messages[0].data);
+
+									/* CSA -> AAA */
+									numbers_meta_add_dep(mlist, deps, csaid, aaaid);
+
+									ai.messages[0].data = write_shallow(mlist);
+								});
+							});
+
+							/* .TSK.AnnotationAuthorArchive (212) TODO: unify names across book */
+							if(!authors[cc.a||""]) authors[cc.a||""] = numbers_add_msg(cfb, 212, [ [],
+								[ { type: 2, data: stru8(cc.a||"") }],
+								[ { type: 2, data: get_author_color(++iauthor) }],
+								[],
+								[ { type: 0, data: write_varint49(0) } ]
+							], "/Index/Tables/DataList", deps);
+							var aaaid = authors[cc.a||""];
+
+							/* .TSD.CommentStorageArchive (3056) */
+							var csaid = numbers_add_msg(cfb, 3056, [ [],
+								[ { type: 2, data: stru8(cc.t||"") }],
+								[ { type: 2, data: write_shallow([[],
+									[ { type: 1, data: new Uint8Array([0, 0, 0, 128, 116, 109, 182, 65]) }]
+								]) }],
+								[ { type: 2, data: write_TSP_Reference(aaaid) }],
+								replies.map(r => ({type: 2, data: write_TSP_Reference(r)})),
+								[ { type: 2, data: write_shallow([[],
+									[ { type: 0, data: write_varint49(i) }],
+									[ { type: 0, data: write_varint49(0) }]
+								]) }],
+							], "/Index/Tables/DataList", deps);
+							numbers_iwa_doit(cfb, deps, csaid, iwa => {
+								numbers_add_oref(iwa, aaaid);
+								replies.forEach(r => numbers_add_oref(iwa, r));
+							});
+
+							/* add to TableDataList */
+							cmntdata[3].push({type: 2, data: write_shallow([ [],
+								[ { type: 0, data: write_varint49(i) } ],
+								[ { type: 0, data: write_varint49(1) } ],
+								[], [], [], [], [], [], [], // skip fields 3-9
+								[ { type: 2, data: write_TSP_Reference(csaid) } ]
+							])});
+							numbers_add_oref(cmntroot, csaid);
+
+							/* meta deps */
+							numbers_iwa_doit(cfb, deps, 2, ai => {
+								var mlist = parse_shallow(ai.messages[0].data);
+								numbers_meta_add_dep(mlist, deps, cmntref, csaid); //  table -> CSA
+								numbers_meta_add_dep(mlist, deps, csaid, aaaid); // CSA -> author
+								if(replies.length) numbers_meta_add_dep(mlist, deps, csaid, replies); // CSA -> replies
+								ai.messages[0].data = write_shallow(mlist);
+							});
+
+						});
+					}
+					cmntdata[2][0].data = write_varint49(LUT.cmnt.length + 1);
+					cmntroot.messages[0].data = write_shallow(cmntdata);
+				});
+			}
 		}
 		pb[4][0].data = write_shallow(store);
 	}

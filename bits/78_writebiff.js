@@ -374,7 +374,7 @@ function write_comments_biff8(ba/*:BufArray*/, comments/*:Array<[Comment[], numb
 				}
 			}
 		}
-		write_biff_rec(ba, 0x00EC, /* hdr */ bconcat([hdr, _oasc]));
+		write_biff_rec(ba, 0x00EC, /* hdr */ _oasc ? bconcat([hdr, _oasc]) : hdr);
 	}
 	ba.push(pl.end());
 	notes.forEach(function(n) { write_biff_rec(ba, 0x001C, n); });
