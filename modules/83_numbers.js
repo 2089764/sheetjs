@@ -566,10 +566,10 @@ function numbers_format_cell(cell, t, flags, ofmt, nfmt) {
         cell.w = cell.w.replace(/:(\d\d\d)$/, ".$1");
     }
 }
-function parse_old_storage(buf, lut, v) {
+function parse_old_storage(buf, lut, v, opts) {
   var dv = u8_to_dataview(buf);
   var flags = dv.getUint32(4, true);
-  var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dt = new Date(2001, 0, 1);
+  var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1));
   var doff = v > 1 ? 12 : 8;
   if (flags & 2) {
     zidx = dv.getUint32(doff, true);
@@ -590,7 +590,7 @@ function parse_old_storage(buf, lut, v) {
     doff += 8;
   }
   if (flags & 64) {
-    dt.setTime(dt.getTime() + dv.getFloat64(doff, true) * 1e3);
+    dt.setTime(dt.getTime() + (dc = dv.getFloat64(doff, true)) * 1e3);
     doff += 8;
   }
   if (v > 1) {
@@ -613,7 +613,12 @@ function parse_old_storage(buf, lut, v) {
       ret = { t: "s", v: lut.sst[sidx] };
       break;
     case 5:
-      ret = { t: "d", v: dt };
+      {
+        if (opts == null ? void 0 : opts.cellDates)
+          ret = { t: "d", v: dt };
+        else
+          ret = { t: "n", v: dc / 86400 + 35430, z: table_fmt[14] };
+      }
       break;
     case 6:
       ret = { t: "b", v: ieee > 0 };
@@ -644,12 +649,12 @@ function parse_old_storage(buf, lut, v) {
     ret.v /= 86400;
   return ret;
 }
-function parse_new_storage(buf, lut) {
+function parse_new_storage(buf, lut, opts) {
   var dv = u8_to_dataview(buf);
   var flags = dv.getUint32(4, true);
   var fields = dv.getUint32(8, true);
   var doff = 12;
-  var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dt = new Date(2001, 0, 1), eidx = -1, fidx = -1;
+  var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1)), eidx = -1, fidx = -1;
   if (fields & 1) {
     d128 = readDecimal128LE(buf, doff);
     doff += 16;
@@ -659,7 +664,7 @@ function parse_new_storage(buf, lut) {
     doff += 8;
   }
   if (fields & 4) {
-    dt.setTime(dt.getTime() + dv.getFloat64(doff, true) * 1e3);
+    dt.setTime(dt.getTime() + (dc = dv.getFloat64(doff, true)) * 1e3);
     doff += 8;
   }
   if (fields & 8) {
@@ -693,7 +698,12 @@ function parse_new_storage(buf, lut) {
       ret = { t: "s", v: lut.sst[sidx] };
       break;
     case 5:
-      ret = { t: "d", v: dt };
+      {
+        if (opts == null ? void 0 : opts.cellDates)
+          ret = { t: "d", v: dt };
+        else
+          ret = { t: "n", v: dc / 86400 + 35430, z: table_fmt[14] };
+      }
       break;
     case 6:
       ret = { t: "b", v: ieee > 0 };
@@ -744,10 +754,18 @@ function write_new_storage(cell, lut) {
   out[0] = 5;
   switch (cell.t) {
     case "n":
-      out[1] = 2;
-      writeDecimal128LE(out, l, cell.v);
-      fields |= 1;
-      l += 16;
+      if (cell.z && fmt_is_date(cell.z)) {
+        out[1] = 5;
+        dv.setFloat64(l, (numdate(cell.v + 1462).getTime() - Date.UTC(2001, 0, 1)) / 1e3, true);
+        fields |= 4;
+        l += 8;
+        break;
+      } else {
+        out[1] = 2;
+        writeDecimal128LE(out, l, cell.v);
+        fields |= 1;
+        l += 16;
+      }
       break;
     case "b":
       out[1] = 6;
@@ -780,6 +798,12 @@ function write_new_storage(cell, lut) {
         }
       }
       break;
+    case "d":
+      out[1] = 5;
+      dv.setFloat64(l, (cell.v.getTime() - Date.UTC(2001, 0, 1)) / 1e3, true);
+      fields |= 4;
+      l += 8;
+      break;
     case "z":
       out[1] = 0;
       break;
@@ -796,7 +820,7 @@ function write_new_storage(cell, lut) {
   return out[subarray](0, l);
 }
 function write_old_storage(cell, lut) {
-  var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
+  var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0, s = "";
   out[0] = 4;
   switch (cell.t) {
     case "n":
@@ -805,7 +829,7 @@ function write_old_storage(cell, lut) {
       break;
     case "s":
       {
-        var s = cell.v == null ? "" : String(cell.v);
+        s = cell.v == null ? "" : String(cell.v);
         if (cell.l) {
           var irsst = lut.rsst.findIndex(function(v) {
             var _a;
@@ -820,6 +844,10 @@ function write_old_storage(cell, lut) {
         } else {
         }
       }
+      break;
+    case "d":
+      break;
+    case "e":
       break;
     case "z":
       break;
@@ -846,7 +874,7 @@ function write_old_storage(cell, lut) {
       break;
     case "s":
       {
-        var s = cell.v == null ? "" : String(cell.v);
+        s = cell.v == null ? "" : String(cell.v);
         if (cell.l) {
         } else {
           var isst = lut.sst.indexOf(s);
@@ -859,6 +887,12 @@ function write_old_storage(cell, lut) {
         }
       }
       break;
+    case "d":
+      out[1] = 5;
+      dv.setFloat64(l, (cell.v.getTime() - Date.UTC(2001, 0, 1)) / 1e3, true);
+      fields |= 64;
+      l += 8;
+      break;
     case "z":
       out[1] = 0;
       break;
@@ -868,16 +902,16 @@ function write_old_storage(cell, lut) {
   dv.setUint32(8, fields, true);
   return out[subarray](0, l);
 }
-function parse_cell_storage(buf, lut) {
+function parse_cell_storage(buf, lut, opts) {
   switch (buf[0]) {
     case 0:
     case 1:
     case 2:
     case 3:
     case 4:
-      return parse_old_storage(buf, lut, buf[0]);
+      return parse_old_storage(buf, lut, buf[0], opts);
     case 5:
-      return parse_new_storage(buf, lut);
+      return parse_new_storage(buf, lut, opts);
     default:
       throw new Error("Unsupported payload version ".concat(buf[0]));
   }
@@ -1082,7 +1116,7 @@ function s5s_to_iwa_comment(s5s) {
   }
   return out;
 }
-function parse_TST_TableModelArchive(M, root, ws) {
+function parse_TST_TableModelArchive(M, root, ws, opts) {
   var _a, _b, _c, _d, _e, _f, _g, _h, _i;
   var pb = parse_shallow(root.data);
   var range = { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
@@ -1121,7 +1155,7 @@ function parse_TST_TableModelArchive(M, root, ws) {
     var _tile = parse_TST_Tile(M, ref2);
     _tile.data.forEach(function(row, R) {
       row.forEach(function(buf, C) {
-        var res = parse_cell_storage(buf, lut);
+        var res = parse_cell_storage(buf, lut, opts);
         if (res) {
           if (dense) {
             if (!dws["!data"][_R + R])
@@ -1162,7 +1196,7 @@ function parse_TST_TableInfoArchive(M, root, opts) {
   var mtype = varint_to_i32(tableref[0].meta[1][0].data);
   if (mtype != 6001)
     throw new Error("6000 unexpected reference to ".concat(mtype));
-  parse_TST_TableModelArchive(M, tableref[0], out);
+  parse_TST_TableModelArchive(M, tableref[0], out, opts);
   return out;
 }
 function parse_TN_SheetArchive(M, root, opts) {
@@ -1185,6 +1219,7 @@ function parse_TN_SheetArchive(M, root, opts) {
 function parse_TN_DocumentArchive(M, root, opts) {
   var _a;
   var out = book_new();
+  out.Workbook = { WBProps: { date1904: true } };
   var pb = parse_shallow(root.data);
   if ((_a = pb[2]) == null ? void 0 : _a[0])
     throw new Error("Keynote presentations are not supported");
@@ -1300,8 +1335,8 @@ function write_TST_TileRowInfo(data, lut, wide) {
     switch (data[C].t) {
       case "d":
         if (data[C].v instanceof Date) {
-          celload = write_new_storage({ t: "s", v: data[C].v.toISOString() }, lut);
-          _celload = write_old_storage({ t: "s", v: data[C].v.toISOString() }, lut);
+          celload = write_new_storage(data[C], lut);
+          _celload = write_old_storage(data[C], lut);
           break;
         }
         celload = write_new_storage(data[C], lut);

@@ -1221,7 +1221,7 @@ var XLSRecordEnum = {
 	/*::[*/0x0002/*::]*/: { /* n:"BIFF2INT", */ f:parse_BIFF2INT },
 	/*::[*/0x0003/*::]*/: { /* n:"BIFF2NUM", */ f:parse_BIFF2NUM },
 	/*::[*/0x0004/*::]*/: { /* n:"BIFF2STR", */ f:parse_BIFF2STR },
-	/*::[*/0x0005/*::]*/: { /* n:"BoolErr", */ f:parse_BoolErr },
+	/*::[*/0x0005/*::]*/: { /* n:"BIFF2BOOLERR", */ f:parse_BIFF2BOOLERR },
 	/*::[*/0x0007/*::]*/: { /* n:"String", */ f:parse_BIFF2STRING },
 	/*::[*/0x0008/*::]*/: { /* n:"BIFF2ROW", */ },
 	/*::[*/0x0009/*::]*/: { /* n:"BOF", */ f:parse_BOF },
@@ -1260,7 +1260,7 @@ var XLSRecordEnum = {
 
 	/* - - - */
 	/*::[*/0x0034/*::]*/: { /* n:"DDEObjName", */ },
-	/*::[*/0x0043/*::]*/: { /* n:"BIFF2XF", */ },
+	/*::[*/0x0043/*::]*/: { /* n:"BIFF2XF", */ f:parse_BIFF2XF },
 	/*::[*/0x0044/*::]*/: { /* n:"BIFF2XFINDEX", */ f:parseuint16 },
 	/*::[*/0x0045/*::]*/: { /* n:"BIFF2FONTCLR", */ },
 	/*::[*/0x0056/*::]*/: { /* n:"BIFF4FMTCNT", */ }, /* 16-bit cnt, similar to BIFF2 */
@@ -1272,7 +1272,7 @@ var XLSRecordEnum = {
 	// 0x8A
 	// 0x8B LH: alternate menu key flag (BIFF3/4)
 	// 0x8E
-	// 0x8F
+	/*::[*/0x008F/*::]*/: { /* n:"BIFF4SheetInfo", */ f:parse_BIFF4SheetInfo },
 	/*::[*/0x0091/*::]*/: { /* n:"Sub", */ },
 	// 0x93 STYLE
 	/*::[*/0x0094/*::]*/: { /* n:"LHRecord", */ },
@@ -1298,10 +1298,10 @@ var XLSRecordEnum = {
 	/*::[*/0x0218/*::]*/: { /* n:"Lbl", */ f:parse_Lbl },
 	/*::[*/0x0223/*::]*/: { /* n:"ExternName", */ f:parse_ExternName },
 	/*::[*/0x0231/*::]*/: { /* n:"Font", */ },
-	/*::[*/0x0243/*::]*/: { /* n:"BIFF3XF", */ },
+	/*::[*/0x0243/*::]*/: { /* n:"BIFF3XF", */ f:parse_BIFF3XF },
 	/*::[*/0x0406/*::]*/: { /* n:"Formula", */ f:parse_Formula },
 	/*::[*/0x0409/*::]*/: { /* n:"BOF", */ f:parse_BOF },
-	/*::[*/0x0443/*::]*/: { /* n:"BIFF4XF", */ },
+	/*::[*/0x0443/*::]*/: { /* n:"BIFF4XF", */ f:parse_BIFF4XF },
 	/*::[*/0x086d/*::]*/: { /* n:"FeatInfo", */ },
 	/*::[*/0x0873/*::]*/: { /* n:"FeatInfo11", */ },
 	/*::[*/0x0881/*::]*/: { /* n:"SXAddl12", */ },

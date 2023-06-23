@@ -40,10 +40,10 @@ function xlml_parsexmltagobj(tag/*:string*/) {
 /* map from xlml named formats to SSF TODO: localize */
 var XLMLFormatMap/*: {[string]:string}*/;
 
-function xlml_format(format, value)/*:string*/ {
+function xlml_format(format, value, date1904)/*:string*/ {
 	var fmt = XLMLFormatMap[format] || unescapexml(format);
 	if(fmt === "General") return SSF_general(value);
-	return SSF_format(fmt, value);
+	return SSF_format(fmt, value, {date1904: !!date1904});
 }
 
 function xlml_set_custprop(Custprops, key, cp, val/*:string*/) {
@@ -59,7 +59,7 @@ function xlml_set_custprop(Custprops, key, cp, val/*:string*/) {
 	Custprops[unescapexml(key)] = oval;
 }
 
-function safe_format_xlml(cell/*:Cell*/, nf, o) {
+function safe_format_xlml(cell/*:Cell*/, nf, o, date1904) {
 	if(cell.t === 'z') return;
 	if(!o || o.cellText !== false) try {
 		if(cell.t === 'e') { cell.w = cell.w || BErr[cell.v]; }
@@ -70,13 +70,13 @@ function safe_format_xlml(cell/*:Cell*/, nf, o) {
 			}
 			else cell.w = SSF_general(cell.v);
 		}
-		else cell.w = xlml_format(nf||"General", cell.v);
+		else cell.w = xlml_format(nf||"General", cell.v, date1904);
 	} catch(e) { if(o.WTF) throw e; }
 	try {
 		var z = XLMLFormatMap[nf]||nf||"General";
 		if(o.cellNF) cell.z = z;
 		if(o.cellDates && cell.t == 'n' && fmt_is_date(z)) {
-			var _d = SSF_parse_date_code(cell.v); if(_d) { cell.t = 'd'; cell.v = new Date(_d.y, _d.m-1,_d.d,_d.H,_d.M,_d.S,_d.u); }
+			var _d = SSF_parse_date_code(cell.v + (date1904 ? 1462 : 0)); if(_d) { cell.t = 'd'; cell.v = new Date(Date.UTC(_d.y, _d.m-1,_d.d,_d.H,_d.M,_d.S,_d.u)); }
 		}
 	} catch(e) { if(o.WTF) throw e; }
 }
@@ -92,7 +92,7 @@ function process_style_xlml(styles, stag, opts) {
 }
 
 /* TODO: there must exist some form of OSP-blessed spec */
-function parse_xlml_data(xml, ss, data, cell/*:any*/, base, styles, csty, row, arrayf, o) {
+function parse_xlml_data(xml, ss, data, cell/*:any*/, base, styles, csty, row, arrayf, o, date1904) {
 	var nf = "General", sid = cell.StyleID, S = {}; o = o || {};
 	var interiors = [];
 	var i = 0;
@@ -115,9 +115,8 @@ function parse_xlml_data(xml, ss, data, cell/*:any*/, base, styles, csty, row, a
 			break;
 		case 'DateTime':
 			if(xml.slice(-1) != "Z") xml += "Z";
-			cell.v = (parseDate(xml) - new Date(Date.UTC(1899, 11, 30))) / (24 * 60 * 60 * 1000);
+			cell.v = datenum(parseDate(xml, date1904), date1904);
 			if(cell.v !== cell.v) cell.v = unescapexml(xml);
-			else if(cell.v<60) cell.v = cell.v -1;
 			if(!nf || nf == "General") nf = "yyyy-mm-dd";
 			/* falls through */
 		case 'Number':
@@ -130,7 +129,7 @@ function parse_xlml_data(xml, ss, data, cell/*:any*/, base, styles, csty, row, a
 			else { cell.t = 's'; cell.v = xlml_fixstr(ss||xml); }
 			break;
 	}
-	safe_format_xlml(cell, nf, o);
+	safe_format_xlml(cell, nf, o, date1904);
 	if(o.cellFormula !== false) {
 		if(cell.Formula) {
 			var fstr = unescapexml(cell.Formula);
@@ -232,7 +231,7 @@ function parse_xlml_xml(d, _opts)/*:Workbook*/ {
 				break;
 			}
 			if(state[state.length-1][1]) break;
-			if(Rn[1]==='/') parse_xlml_data(str.slice(didx, Rn.index), ss, dtag, state[state.length-1][0]==/*"Comment"*/"comment"?comment:cell, {c:c,r:r}, styles, cstys[c], row, arrayf, opts);
+			if(Rn[1]==='/') parse_xlml_data(str.slice(didx, Rn.index), ss, dtag, state[state.length-1][0]==/*"Comment"*/"comment"?comment:cell, {c:c,r:r}, styles, cstys[c], row, arrayf, opts, Workbook.WBProps.date1904);
 			else { ss = ""; dtag = xlml_parsexmltag(Rn[0]); didx = Rn.index + Rn[0].length; }
 			break;
 		case 'cell' /*case 'Cell'*/:

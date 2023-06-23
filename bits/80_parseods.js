@@ -263,7 +263,6 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 		var creator = "", creatoridx = 0;
 		var isstub = false, intable = false;
 		var i = 0;
-		var baddate = 0;
 		xlmlregex.lastIndex = 0;
 		str = str.replace(/<!--([\s\S]*?)-->/mg,"").replace(/<!DOCTYPE[^\[]*\[[^\]]*\]>/gm,"");
 		while((Rn = xlmlregex.exec(str))) switch((Rn[3]=Rn[3].replace(/_.*$/,""))) {
@@ -370,19 +369,23 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 					/* 19.675.2 table:number-columns-repeated */
 					if(ctag['number-columns-repeated']) colpeat = parseInt(ctag['number-columns-repeated'], 10);
 
-					/* 19.385 office:value-type */
+					/* 19.385 office:value-type TODO: verify ODS and UOS */
 					switch(q.t) {
 						case 'boolean': q.t = 'b'; q.v = parsexmlbool(ctag['boolean-value']) || (+ctag['boolean-value'] >= 1); break;
-						case 'float': q.t = 'n'; q.v = parseFloat(ctag.value); break;
+						case 'float': q.t = 'n'; q.v = parseFloat(ctag.value);
+							if(opts.cellDates && q.z && fmt_is_date(q.z)) { q.v = numdate(q.v + (WB.WBProps.date1904 ? 1462 : 0)); q.t = typeof q.v == "number" ? 'n' : 'd'; }
+							break;
 						case 'percentage': q.t = 'n'; q.v = parseFloat(ctag.value); break;
 						case 'currency': q.t = 'n'; q.v = parseFloat(ctag.value); break;
-						case 'date': q.t = 'd'; q.v = parseDate(ctag['date-value']);
-							if(!opts.cellDates) { q.t = 'n'; q.v = datenum(q.v, WB.WBProps.date1904) - baddate; }
+						case 'date': q.t = 'd'; q.v = parseDate(ctag['date-value'], WB.WBProps.date1904);
+							if(!opts.cellDates) { q.t = 'n'; q.v = datenum(q.v, WB.WBProps.date1904); }
 							if(!q.z) q.z = 'm/d/yy'; break;
+						/* NOTE: for `time`, Excel ODS export incorrectly uses durations relative to 1900 epoch even if 1904 is specified */
 						case 'time': q.t = 'n'; q.v = parse_isodur(ctag['time-value'])/86400;
-							if(opts.cellDates) { q.t = 'd'; q.v = numdate(q.v); }
+							if(opts.cellDates) { q.v = numdate(q.v); q.t = typeof q.v == "number" ? 'n' : 'd'; }
 							if(!q.z) q.z = 'HH:MM:SS'; break;
-						case 'number': q.t = 'n'; q.v = parseFloat(ctag['数据数值']); break;
+						case 'number': q.t = 'n'; q.v = parseFloat(ctag['数据数值']);
+							break;
 						default:
 							if(q.t === 'string' || q.t === 'text' || !q.t) {
 								q.t = 's';
@@ -579,9 +582,7 @@ function parse_content_xml(d/*:string*/, _opts, _nfm)/*:Workbook*/ {
 			case 'null-date': // 9.4.2 <table:null-date>
 				tag = parsexmltag(Rn[0], false);
 				switch(tag["date-value"]) {
-					case "1904-01-01": WB.WBProps.date1904 = true;
-					/* falls through */
-					case "1900-01-01": baddate = 0;
+					case "1904-01-01": WB.WBProps.date1904 = true; break;
 				}
 				break;
 

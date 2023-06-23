@@ -99,7 +99,9 @@ function write_number_format_ods(nf/*:string*/, nfidx/*:string*/)/*:string*/ {
 					while(nf[++i] != '"' || nf[++i] == '"') c += nf[i]; --i;
 					payload += '<number:text>' + escapexml(c.slice(1).replace(/""/g, '"')) + '</number:text>';
 					break;
-				case '/': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '\\': c = nf[++i];
+					payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '/': case ':': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
 				default: console.error("unrecognized character " + c + " in ODF format " + nf);
 			}
 			if(!has_time) break j;
@@ -126,7 +128,7 @@ function write_number_format_ods(nf/*:string*/, nfidx/*:string*/)/*:string*/ {
 					while(nf[++i] != '"' || nf[++i] == '"') c += nf[i]; --i;
 					payload += '<number:text>' + escapexml(c.slice(1).replace(/""/g, '"')) + '</number:text>';
 					break;
-				case '/': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '/': case ':': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
 				case "a":
 					if(nf.slice(i, i+3).toLowerCase() == "a/p") { payload += '<number:am-pm/>'; i += 2; break; } // Note: ODF does not support A/P
 					if(nf.slice(i, i+5).toLowerCase() == "am/pm")  { payload += '<number:am-pm/>'; i += 4; break; }
@@ -182,10 +184,15 @@ function write_number_format_ods(nf/*:string*/, nfidx/*:string*/)/*:string*/ {
 }
 
 function write_names_ods(Names, SheetNames, idx) {
-	var scoped = Names.filter(function(name) { return name.Sheet == (idx == -1 ? null : idx); });
+	//var scoped = Names.filter(function(name) { return name.Sheet == (idx == -1 ? null : idx); });
+	var scoped = []; for(var namei = 0; namei < Names.length; ++namei) {
+		var name = Names[namei];
+		if(!name) continue;
+		if(name.Sheet == (idx == -1 ? null : idx)) scoped.push(name);
+	}
 	if(!scoped.length) return "";
 	return "      <table:named-expressions>\n" + scoped.map(function(name) {
-		var odsref =  csf_to_ods_3D(name.Ref);
+		var odsref =  (idx == -1 ? "$" : "") + csf_to_ods_3D(name.Ref);
 		return "        " + writextag("table:named-range", null, {
 			"table:name": name.Name,
 			"table:cell-range-address": odsref,
@@ -204,7 +211,7 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 	};
 
 	var null_cell_xml = '          <table:table-cell />\n';
-	var write_ws = function(ws, wb/*:Workbook*/, i/*:number*/, opts, nfs)/*:string*/ {
+	var write_ws = function(ws, wb/*:Workbook*/, i/*:number*/, opts, nfs, date1904)/*:string*/ {
 		/* Section 9 Tables */
 		var o/*:Array<string>*/ = [];
 		o.push('      <table:table table:name="' + escapexml(wb.SheetNames[i]) + '" table:style-name="ta1">\n');
@@ -264,9 +271,9 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 						ct['office:value-type'] = "string";
 						break;
 					case 'd':
-						textp = (cell.w||(parseDate(cell.v).toISOString()));
+						textp = (cell.w||(parseDate(cell.v, date1904).toISOString()));
 						ct['office:value-type'] = "date";
-						ct['office:date-value'] = (parseDate(cell.v).toISOString());
+						ct['office:date-value'] = (parseDate(cell.v, date1904).toISOString());
 						ct['table:style-name'] = "ce1";
 						break;
 					//case 'e': // TODO: translate to ODS errors
@@ -436,7 +443,7 @@ var write_content_ods/*:{(wb:any, opts:any):string}*/ = /* @__PURE__ */(function
 		o.push('  <office:body>\n');
 		o.push('    <office:spreadsheet>\n');
 		if(((wb.Workbook||{}).WBProps||{}).date1904) o.push('      <table:calculation-settings table:case-sensitive="false" table:search-criteria-must-apply-to-whole-cell="true" table:use-wildcards="true" table:use-regular-expressions="false" table:automatic-find-labels="false">\n        <table:null-date table:date-value="1904-01-01"/>\n      </table:calculation-settings>\n');
-		for(var i = 0; i != wb.SheetNames.length; ++i) o.push(write_ws(wb.Sheets[wb.SheetNames[i]], wb, i, opts, nfs));
+		for(var i = 0; i != wb.SheetNames.length; ++i) o.push(write_ws(wb.Sheets[wb.SheetNames[i]], wb, i, opts, nfs, ((wb.Workbook||{}).WBProps||{}).date1904));
 		if((wb.Workbook||{}).Names) o.push(write_names_ods(wb.Workbook.Names, wb.SheetNames, -1));
 		o.push('    </office:spreadsheet>\n');
 		o.push('  </office:body>\n');

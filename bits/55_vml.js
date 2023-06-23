@@ -5,6 +5,7 @@ function parse_vml(data/*:string*/, sheet, comments) {
 	(data.match(shapevmlregex)||[]).forEach(function(m) {
 		var type = "";
 		var hidden = true;
+		var aidx = -1;
 		var R = -1, C = -1;
 		m.replace(tagregex, function(x/*:string*/, idx/*:number*/) {
 			var y = parsexmltag(x);

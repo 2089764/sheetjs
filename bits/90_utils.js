@@ -24,7 +24,12 @@ function make_json_row(sheet/*:Worksheet*/, r/*:Range*/, R/*:number*/, cols/*:Ar
 		switch(val.t){
 			case 'z': if(v == null) break; continue;
 			case 'e': v = (v == 0 ? null : void 0); break;
-			case 's': case 'd': case 'b': case 'n': break;
+			case 's': case 'b':
+			case 'n': if(!val.z || !fmt_is_date(val.z)) break;
+			v = numdate(v); // TODO: date1904 setting should also be stored in worksheet object
+			if(typeof v == "number") break;
+			/* falls through */
+			case 'd': if(!(o && o.UTC)) v = utc_to_local(v); break;
 			default: throw new Error('unrecognized type ' + val.t);
 		}
 		if(hdr[C] != null) {
@@ -234,6 +239,7 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 				else if(typeof v == 'string') t = 's';
 				else if(v instanceof Date) {
 					t = 'd';
+					if(!o.UTC) v = local_to_utc(v);
 					if(!o.cellDates) { t = 'n'; v = datenum(v); }
 					z = (cell != null && cell.z && fmt_is_date(cell.z)) ? cell.z : (o.dateNF || table_fmt[14]);
 				}

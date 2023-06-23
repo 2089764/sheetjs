@@ -55,7 +55,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	}
 
 	/* 18.3.1.80 sheetData CT_SheetData ? */
-	if(mtch) parse_ws_xml_data(mtch[1], s, opts, refguess, themes, styles);
+	if(mtch) parse_ws_xml_data(mtch[1], s, opts, refguess, themes, styles, wb);
 
 	/* 18.3.1.2  autoFilter CT_AutoFilter */
 	var afilter = data2.match(afregex);
@@ -76,6 +76,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
 
 	/* legacyDrawing */
+	var m;
 	if((m = data2.match(/legacyDrawing r:id="(.*?)"/))) s['!legrel'] = m[1];
 
 	if(opts && opts.nodim) refguess.s.c = refguess.s.r = 0;
@@ -261,7 +262,7 @@ function write_ws_xml_sheetviews(ws, opts, idx, wb)/*:string*/ {
 	return writextag("sheetViews", writextag("sheetView", null, sview), {});
 }
 
-function write_ws_xml_cell(cell/*:Cell*/, ref, ws, opts/*::, idx, wb*/)/*:string*/ {
+function write_ws_xml_cell(cell/*:Cell*/, ref, ws, opts, idx, wb, date1904)/*:string*/ {
 	if(cell.c) ws['!comments'].push([ref, cell.c]);
 	if((cell.v === undefined || cell.t === "z" && !(opts||{}).sheetStubs) && typeof cell.f !== "string" && typeof cell.z == "undefined") return "";
 	var vv = "";
@@ -274,11 +275,14 @@ function write_ws_xml_cell(cell/*:Cell*/, ref, ws, opts/*::, idx, wb*/)/*:string
 			else vv = ''+cell.v; break;
 		case 'e': vv = BErr[cell.v]; break;
 		case 'd':
-			if(opts && opts.cellDates) vv = parseDate(cell.v, -1).toISOString();
-			else {
+			if(opts && opts.cellDates) {
+				var _vv = parseDate(cell.v, date1904);
+				vv = _vv.toISOString();
+				if(_vv.getUTCFullYear() < 1900) vv = vv.slice(vv.indexOf("T") + 1).replace("Z","");
+			} else {
 				cell = dup(cell);
 				cell.t = 'n';
-				vv = ''+(cell.v = datenum(parseDate(cell.v)));
+				vv = ''+(cell.v = datenum(parseDate(cell.v, date1904), date1904));
 			}
 			if(typeof cell.z === 'undefined') cell.z = table_fmt[14];
 			break;
@@ -321,7 +325,7 @@ var parse_ws_xml_data = /*#__PURE__*/(function() {
 	var refregex = /ref=["']([^"']*)["']/;
 	var match_v = matchtag("v"), match_f = matchtag("f");
 
-return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, themes, styles) {
+return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, themes, styles, wb) {
 	var ri = 0, x = "", cells/*:Array<string>*/ = [], cref/*:?Array<string>*/ = [], idx=0, i=0, cc=0, d="", p/*:any*/;
 	var tag, tagr = 0, tagc = 0;
 	var sstr, ftag;
@@ -332,6 +336,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var dense = s["!data"] != null;
 	var rows/*:Array<RowInfo>*/ = [], rowobj = {}, rowrite = false;
 	var sheetStubs = !!opts.sheetStubs;
+	var date1904 = !!((wb||{}).WBProps||{}).date1904;
 	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
@@ -476,8 +481,8 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 					break;
 				case 'b': p.v = parsexmlbool(p.v); break;
 				case 'd':
-					if(opts.cellDates) p.v = parseDate(p.v, 1);
-					else { p.v = datenum(parseDate(p.v, 1)); p.t = 'n'; }
+					if(opts.cellDates) p.v = parseDate(p.v, date1904);
+					else { p.v = datenum(parseDate(p.v, date1904), date1904); p.t = 'n'; }
 					break;
 				/* error string in .w, number in .v */
 				case 'e':
@@ -496,8 +501,8 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 					}
 				}
 			}
-			safe_format(p, fmtid, fillid, opts, themes, styles);
-			if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.t = 'd'; p.v = numdate(p.v); }
+			safe_format(p, fmtid, fillid, opts, themes, styles, date1904);
+			if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.v = numdate(p.v + (date1904 ? 1462 : 0)); p.t = typeof p.v == "number" ? 'n' : 'd'; }
 			if(tag.cm && opts.xlmeta) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];
 				if(cm && cm.type == 'XLDAPR') p.D = true;
@@ -522,6 +527,7 @@ function write_ws_xml_data(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbook
 	var o/*:Array<string>*/ = [], r/*:Array<string>*/ = [], range = safe_decode_range(ws['!ref']), cell="", ref, rr = "", cols/*:Array<string>*/ = [], R=0, C=0, rows = ws['!rows'];
 	var dense = ws["!data"] != null;
 	var params = ({r:rr}/*:any*/), row/*:RowInfo*/, height = -1;
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	for(C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(R = range.s.r; R <= range.e.r; ++R) {
 		r = [];
@@ -530,7 +536,7 @@ function write_ws_xml_data(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbook
 			ref = cols[C] + rr;
 			var _cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 			if(_cell === undefined) continue;
-			if((cell = write_ws_xml_cell(_cell, ref, ws, opts, idx, wb)) != null) r.push(cell);
+			if((cell = write_ws_xml_cell(_cell, ref, ws, opts, idx, wb, date1904)) != null) r.push(cell);
 		}
 		if(r.length > 0 || (rows && rows[R])) {
 			params = ({r:rr}/*:any*/);

@@ -4,7 +4,7 @@
 /* these are type imports and do not show up in the generated JS */
 import { CFB$Container, CFB$Entry } from 'cfb';
 import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions, DenseWorkSheet, Comments } from '../';
-import type { utils } from "../";
+import type { utils, NumberFormat } from "../";
 
 declare var encode_col: typeof utils.encode_col;
 declare var encode_row: typeof utils.encode_row;
@@ -12,6 +12,9 @@ declare var encode_range: typeof utils.encode_range;
 declare var book_new: typeof utils.book_new;
 declare var book_append_sheet: typeof utils.book_append_sheet;
 declare var decode_range: typeof utils.decode_range;
+declare var numdate: (num: number) => Date;
+declare var table_fmt: {[nf: number]: string};
+declare function fmt_is_date(fmt: NumberFormat): boolean;
 import * as _CFB from 'cfb';
 declare var CFB: typeof _CFB;
 //<<import { utils } from "../../";
@@ -487,11 +490,11 @@ function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: P
 }
 
 /** Parse "old storage" (version 0..4) */
-function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObject | void {
+function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4, opts?: ParsingOptions): CellObject | void {
 	var dv = u8_to_dataview(buf);
 	var flags = dv.getUint32(4, true);
 
-	var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dt = new Date(2001, 0, 1);
+	var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1));
 	var doff = (v > 1 ? 12 : 8);
 	if(flags & 0x0002) { zidx = dv.getUint32(doff,  true); doff += 4;}
 	doff += popcnt(flags & (v > 1 ? 0x0D8C : 0x018C)) * 4;
@@ -500,7 +503,7 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 	doff += popcnt(flags & (v > 1 ? 0x3000 : 0x1000)) * 4;
 	if(flags & 0x0010) { sidx = dv.getUint32(doff,  true); doff += 4; }
 	if(flags & 0x0020) { ieee = dv.getFloat64(doff, true); doff += 8; }
-	if(flags & 0x0040) { dt.setTime(dt.getTime() +  dv.getFloat64(doff, true) * 1000); doff += 8; }
+	if(flags & 0x0040) { dt.setTime(dt.getTime() +  (dc = dv.getFloat64(doff, true)) * 1000); doff += 8; }
 
 	if(v > 1) {
 		flags = dv.getUint32(8, true) >>> 16;
@@ -514,7 +517,10 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 		case 0: return void 0; // return { t: "z" }; // blank?
 		case 2: ret = { t: "n", v: ieee }; break; // number
 		case 3: ret = { t: "s", v: lut.sst[sidx] }; break; // string
-		case 5: ret = { t: "d", v: dt }; break; // date-time
+		case 5: { // date-time
+			if(opts?.cellDates) ret = { t: "d", v: dt };
+			else ret = ({ t: "n", v: dc/(86400)+35430, z: table_fmt[14]});
+		} break;
 		case 6: ret = { t: "b", v: ieee > 0 }; break; // boolean
 		case 7: ret = { t: "n", v: ieee }; break; // duration in seconds
 		case 8: ret = { t: "e", v: 0}; break; // "formula error" TODO: enumerate and map errors to csf equivalents
@@ -534,19 +540,19 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 }
 
 /** Parse "new storage" (version 5) */
-function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
+function parse_new_storage(buf: Uint8Array, lut: DataLUT, opts?: ParsingOptions): CellObject | void {
 	var dv = u8_to_dataview(buf);
 	// TODO: bytes 2:3 appear to be unused?
 	var flags = dv.getUint32(4, true);
 	var fields = dv.getUint32(8, true);
 	var doff = 12;
 
-	var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dt = new Date(2001, 0, 1), eidx = -1, fidx = -1;
+	var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1)), eidx = -1, fidx = -1;
 
 	//          0x00001F data
 	if(fields & 0x000001) { d128 = readDecimal128LE(buf, doff); doff += 16; }
 	if(fields & 0x000002) { ieee = dv.getFloat64(doff, true); doff += 8; }
-	if(fields & 0x000004) { dt.setTime(dt.getTime() +  dv.getFloat64(doff, true) * 1000); doff += 8; }
+	if(fields & 0x000004) { dt.setTime(dt.getTime() +  (dc = dv.getFloat64(doff, true)) * 1000); doff += 8; }
 	if(fields & 0x000008) { sidx = dv.getUint32(doff,  true); doff += 4; }
 	if(fields & 0x000010) { ridx = dv.getUint32(doff,  true); doff += 4; }
 
@@ -564,7 +570,10 @@ function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 		case  0: ret = { t: "z" }; break;
 		case  2: ret = { t: "n", v: d128 }; break; // number
 		case  3: ret = { t: "s", v: lut.sst[sidx] }; break; // string
-		case  5: ret = { t: "d", v: dt }; break; // date-time
+		case  5: { // date-time
+			if(opts?.cellDates) ret = { t: "d", v: dt };
+			else ret = ({ t: "n", v: dc/(86400)+35430, z: table_fmt[14]});
+		} break;
 		case  6: ret = { t: "b", v: ieee > 0 }; break; // boolean
 		case  7: ret = { t: "n", v: ieee }; break;  // duration in "s", fixed later
 		case  8: ret = { t: "e", v: 0 }; break; // "formula error" TODO: enumerate and map errors to csf equivalents
@@ -603,7 +612,11 @@ function write_new_storage(cell: CellObject, lut: DataLUT): Uint8Array {
 	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
 	out[0] = 5;
 	switch(cell.t) {
-		case "n": out[1] = 2; writeDecimal128LE(out, l, cell.v as number); fields |= 1; l += 16; break;
+		case "n": if(cell.z && fmt_is_date(cell.z)) {
+			out[1] = 5; dv.setFloat64(l, ((numdate((cell.v as number) + 1462)).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 4; l += 8; break
+		} else {
+			out[1] = 2; writeDecimal128LE(out, l, cell.v as number); fields |= 1; l += 16;
+		} break
 		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 2; l += 8; break;
 		case "s": {
 			var s = cell.v == null ? "" : String(cell.v);
@@ -617,6 +630,8 @@ function write_new_storage(cell: CellObject, lut: DataLUT): Uint8Array {
 				out[1] = 3; dv.setUint32(l, isst, true); fields |= 8; l += 4;
 			}
 		} break;
+		case "d": out[1] = 5; dv.setFloat64(l, ((cell.v as Date).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 4; l += 8; break;
+
 		case "z": out[1] = 0; break;
 		default: throw "unsupported cell type " + cell.t;
 	}
@@ -629,20 +644,22 @@ function write_new_storage(cell: CellObject, lut: DataLUT): Uint8Array {
 }
 /** Write a cell "old storage" (version 4) */
 function write_old_storage(cell: CellObject, lut: DataLUT): Uint8Array {
-	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
+	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0, s = "";
 	out[0] = 4;
 	/* note: rich text appears *before* comments */
 	switch(cell.t) {
 		case "n": break;
 		case "b": break;
 		case "s": {
-			var s = cell.v == null ? "" : String(cell.v);
+			s = cell.v == null ? "" : String(cell.v);
 			if(cell.l) {
 				var irsst = lut.rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
 				if(irsst == -1) lut.rsst[irsst = lut.rsst.length] = { v: s, l: cell.l.Target };
 				out[1] = 9; dv.setUint32(l, irsst, true); fields |= 0x200; l += 4;
 			} else { }
 		} break;
+		case "d": break;
+		case "e": break;
 		case "z": break;
 		default: throw "unsupported cell type " + cell.t;
 	}
@@ -654,13 +671,14 @@ function write_old_storage(cell: CellObject, lut: DataLUT): Uint8Array {
 		case "n": out[1] = 2; dv.setFloat64(l, cell.v as number, true); fields |= 0x20; l += 8; break;
 		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 0x20; l += 8; break;
 		case "s": {
-			var s = cell.v == null ? "" : String(cell.v);
+			s = cell.v == null ? "" : String(cell.v);
 			if(cell.l) { } else {
 				var isst = lut.sst.indexOf(s);
 				if(isst == -1) lut.sst[isst = lut.sst.length] = s;
 				out[1] = 3; dv.setUint32(l, isst, true); fields |= 0x10; l += 4;
 			}
 		} break;
+		case "d": out[1] = 5; dv.setFloat64(l, ((cell.v as Date).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 0x40; l += 8; break;
 		case "z": out[1] = 0; break;
 		default: throw "unsupported cell type " + cell.t;
 	}
@@ -668,11 +686,11 @@ function write_old_storage(cell: CellObject, lut: DataLUT): Uint8Array {
 	return out[subarray](0, l);
 }
 //<<export { write_new_storage, write_old_storage };
-function parse_cell_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
+function parse_cell_storage(buf: Uint8Array, lut: DataLUT, opts?: ParsingOptions): CellObject | void {
 	switch(buf[0]) {
 		case 0: case 1:
-		case 2: case 3: case 4: return parse_old_storage(buf, lut, buf[0]);
-		case 5: return parse_new_storage(buf, lut);
+		case 2: case 3: case 4: return parse_old_storage(buf, lut, buf[0], opts);
+		case 5: return parse_new_storage(buf, lut, opts);
 		default: throw new Error(`Unsupported payload version ${buf[0]}`);
 	}
 }
@@ -885,7 +903,7 @@ function s5s_to_iwa_comment(s5s: Comments): IWAComment {
 }
 
 /** Parse .TST.TableModelArchive (6001) */
-function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet) {
+function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet, opts?: ParsingOptions) {
 	var pb = parse_shallow(root.data);
 	var range: Range = { s: {r:0, c:0}, e: {r:0, c:0} };
 	range.e.r = (varint_to_i32(pb[6][0].data) >>> 0) - 1;
@@ -918,7 +936,7 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 		var _tile = parse_TST_Tile(M, ref);
 		_tile.data.forEach((row, R) => {
 			row.forEach((buf, C) => {
-				var res = parse_cell_storage(buf, lut);
+				var res = parse_cell_storage(buf, lut, opts);
 				if(res) {
 					if(dense) {
 						if(!dws["!data"][_R + R]) dws["!data"][_R + R] = [];
@@ -959,7 +977,7 @@ function parse_TST_TableInfoArchive(M: MessageSpace, root: IWAMessage, opts?: Pa
 	var tableref = M[parse_TSP_Reference(pb[2][0].data)];
 	var mtype = varint_to_i32(tableref[0].meta[1][0].data);
 	if(mtype != 6001) throw new Error(`6000 unexpected reference to ${mtype}`);
-	parse_TST_TableModelArchive(M, tableref[0], out);
+	parse_TST_TableModelArchive(M, tableref[0], out, opts);
 	return out;
 }
 
@@ -987,6 +1005,7 @@ function parse_TN_SheetArchive(M: MessageSpace, root: IWAMessage, opts?: Parsing
 /** Parse .TN.DocumentArchive */
 function parse_TN_DocumentArchive(M: MessageSpace, root: IWAMessage, opts?: ParsingOptions): WorkBook {
 	var out = book_new();
+	out.Workbook = { WBProps: { date1904: true } };
 	var pb = parse_shallow(root.data);
 	if(pb[2]?.[0]) throw new Error("Keynote presentations are not supported");
 
@@ -1093,10 +1112,9 @@ function write_TST_TileRowInfo(data: CellObject[], lut: DataLUT, wide: boolean):
 		var celload: Uint8Array, _celload: Uint8Array;
 		switch(data[C].t) {
 			case "d":
-				// TODO: write the actual date code
 				if(data[C].v instanceof Date) {
-					celload = write_new_storage({t: "s", v: (data[C].v as Date).toISOString()}, lut);
-					/*if(!wide)*/ _celload = write_old_storage({t: "s", v: (data[C].v as Date).toISOString()}, lut);
+					celload = write_new_storage(data[C], lut);
+					/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
 					break;
 				}
 				/* TODO: can esbuild preserve falls through comments ? */

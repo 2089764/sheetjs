@@ -1,10 +1,10 @@
 /*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */
 /* vim: set ts=2: */
 /*exported XLSX */
-/*global global, exports, module, require:false, process:false, Buffer:false, ArrayBuffer:false, DataView:false, Deno:false */
+/*global global, exports, module, require:false, process:false, Buffer:false, ArrayBuffer:false, DataView:false, Deno:false, Float32Array:false */
 var XLSX = {};
 function make_xlsx_lib(XLSX){
-XLSX.version = '0.19.3';
+XLSX.version = '0.20.0';
 var current_codepage = 1200, current_ansi = 1252;
 /*global cptable:true, window */
 var $cptable;
@@ -123,6 +123,26 @@ function Base64_encode_pass(input) {
     c3 = input.charCodeAt(i++);
     if (c3 > 255)
       c3 = 95;
+    e3 = (c2 & 15) << 2 | c3 >> 6;
+    e4 = c3 & 63;
+    if (isNaN(c2)) {
+      e3 = e4 = 64;
+    } else if (isNaN(c3)) {
+      e4 = 64;
+    }
+    o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
+  }
+  return o;
+}
+function Base64_encode_arr(input) {
+  var o = "";
+  var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+  for (var i = 0; i < input.length; ) {
+    c1 = input[i++];
+    e1 = c1 >> 2;
+    c2 = input[i++];
+    e2 = (c1 & 3) << 4 | c2 >> 4;
+    c3 = input[i++];
     e3 = (c2 & 15) << 2 | c3 >> 6;
     e4 = c3 & 63;
     if (isNaN(c2)) {
@@ -474,15 +494,6 @@ function SSF_parse_date_code(v,opts,b2) {
 	out.q = dow;
 	return out;
 }
-var SSFbasedate = new Date(1899, 11, 31, 0, 0, 0);
-var SSFdnthresh = SSFbasedate.getTime();
-var SSFbase1904 = new Date(1900, 2, 1, 0, 0, 0);
-function datenum_local(v, date1904) {
-	var epoch = v.getTime();
-	if(date1904) epoch -= 1461*24*60*60*1000;
-	else if(v >= SSFbase1904) epoch += 24*60*60*1000;
-	return (epoch - (SSFdnthresh + (v.getTimezoneOffset() - SSFbasedate.getTimezoneOffset()) * 60000)) / (24 * 60 * 60 * 1000);
-}
 /* ECMA-376 18.8.30 numFmt*/
 /* Note: `toPrecision` uses standard form when prec > E and E >= -6 */
 /* exponent >= -9 and <= 9 */
@@ -540,7 +551,7 @@ function SSF_general(v, opts) {
 		case 'undefined': return "";
 		case 'object':
 			if(v == null) return "";
-			if(v instanceof Date) return SSF_format(14, datenum_local(v, opts && opts.date1904), opts);
+			if(v instanceof Date) return SSF_format(14, datenum(v, opts && opts.date1904), opts);
 	}
 	throw new Error("unsupported value in General format: " + v);
 }
@@ -1222,7 +1233,7 @@ function SSF_format(fmt,v,o) {
 			break;
 	}
 	if(SSF_isgeneral(sfmt,0)) return SSF_general(v, o);
-	if(v instanceof Date) v = datenum_local(v, o.date1904);
+	if(v instanceof Date) v = datenum(v, o.date1904);
 	var f = choose_fmt(sfmt, v);
 	if(SSF_isgeneral(f[1])) return SSF_general(v, o);
 	if(v === true) v = "TRUE"; else if(v === false) v = "FALSE";
@@ -1305,6 +1316,7 @@ var dateNFregex = /[dD]+|[mM]+|[yYeE]+|[Hh]+|[Ss]+/g;
 function dateNF_regex(dateNF) {
 	var fmt = typeof dateNF == "number" ? table_fmt[dateNF] : dateNF;
 	fmt = fmt.replace(dateNFregex, "(\\d+)");
+	dateNFregex.lastIndex = 0;
 	return new RegExp("^" + fmt + "$");
 }
 function dateNF_fix(str, dateNF, match) {
@@ -1317,6 +1329,7 @@ function dateNF_fix(str, dateNF, match) {
 			case 'm': if(H >= 0) M = v; else m = v; break;
 		}
 	});
+	dateNFregex.lastIndex = 0;
 	if(S >= 0 && M == -1 && m >= 0) { M = m; m = -1; }
 	var datestr = (("" + (Y>=0?Y: new Date().getFullYear())).slice(-4) + "-" + ("00" + (m>=1?m:1)).slice(-2) + "-" + ("00" + (d>=1?d:1)).slice(-2));
 	if(datestr.length == 7) datestr = "0" + datestr;
@@ -3202,7 +3215,7 @@ if(typeof saveAs !== 'undefined') return saveAs(blob, fname);
 			var url = URL.createObjectURL(blob);
 if(typeof chrome === 'object' && typeof (chrome.downloads||{}).download == "function") {
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
-				return chrome.downloads.download({ url: url, filename: fname, saveAs: true});
+				return chrome.downloads.download({ url: url, filename: fname, saveAs: true });
 			}
 			var a = document.createElement("a");
 			if(a.download != null) {
@@ -3211,6 +3224,10 @@ document.body.removeChild(a);
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
 				return url;
 			}
+		} else if(typeof URL !== 'undefined' && !URL.createObjectURL && typeof chrome === 'object') {
+			/* manifest v3 extensions -- no URL.createObjectURL */
+			var b64 = "data:application/octet-stream;base64," + Base64_encode_arr(new Uint8Array(blobify(data)));
+			return chrome.downloads.download({ url: b64, filename: fname, saveAs: true });
 		}
 	}
 	// $FlowIgnore
@@ -3269,22 +3286,19 @@ function evert_arr(obj) {
 	return o;
 }
 
-var basedate = new Date(1899, 11, 30, 0, 0, 0); // 2209161600000
+var dnthresh  = Date.UTC(1899, 11, 30, 0, 0, 0); // -2209161600000
+var dnthresh1 = Date.UTC(1899, 11, 31, 0, 0, 0); // -2209075200000
+var dnthresh2 = Date.UTC(1904, 0, 1, 0, 0, 0); // -2209075200000
 function datenum(v, date1904) {
 	var epoch = v.getTime();
-	if(date1904) epoch -= 1462*24*60*60*1000;
-	var dnthresh = basedate.getTime() + (v.getTimezoneOffset() - basedate.getTimezoneOffset()) * 60000;
-	return (epoch - dnthresh) / (24 * 60 * 60 * 1000);
+	var res = (epoch - dnthresh) / (24 * 60 * 60 * 1000);
+	if(date1904) { res -= 1462; return res < -1402 ? res - 1 : res; }
+	return res < 60 ? res - 1 : res;
 }
-var refdate = new Date();
-var dnthresh = basedate.getTime() + (refdate.getTimezoneOffset() - basedate.getTimezoneOffset()) * 60000;
-var refoffset = refdate.getTimezoneOffset();
 function numdate(v) {
+	if(v >= 60 && v < 61) return v;
 	var out = new Date();
-	out.setTime(v * 24 * 60 * 60 * 1000 + dnthresh);
-	if (out.getTimezoneOffset() !== refoffset) {
-		out.setTime(out.getTime() + (out.getTimezoneOffset() - refoffset) * 60000);
-	}
+	out.setTime((v>60 ? v : (v+1)) * 24 * 60 * 60 * 1000 + dnthresh);
 	return out;
 }
 
@@ -3315,27 +3329,22 @@ function parse_isodur(s) {
 	return sec;
 }
 
-var good_pd_date_1 = new Date('2017-02-19T19:06:09.000Z');
-var good_pd_date = isNaN(good_pd_date_1.getFullYear()) ? new Date('2/19/17') : good_pd_date_1;
-var good_pd = good_pd_date.getFullYear() == 2017;
-/* parses a date as a local date */
-function parseDate(str, fixdate) {
-	var d = new Date(str);
-	if(good_pd) {
-if(fixdate > 0) d.setTime(d.getTime() + d.getTimezoneOffset() * 60 * 1000);
-		else if(fixdate < 0) d.setTime(d.getTime() - d.getTimezoneOffset() * 60 * 1000);
-		return d;
-	}
+/* Blame https://bugs.chromium.org/p/v8/issues/detail?id=7863 for the regexide */
+var pdre1 = /^(\d+):(\d+)(:\d+)?(\.\d+)?$/; // HH:MM[:SS[.UUU]]
+var pdre2 = /^(\d+)-(\d+)-(\d+)$/; // YYYY-mm-dd
+var pdre3 = /^(\d+)-(\d+)-(\d+)[T ](\d+):(\d+)(:\d+)?(\.\d+)?$/; // YYYY-mm-dd(T or space)HH:MM[:SS[.UUU]], sans "Z"
+/* parses a date string as a UTC date */
+function parseDate(str, date1904) {
 	if(str instanceof Date) return str;
-	if(good_pd_date.getFullYear() == 1917 && !isNaN(d.getFullYear())) {
-		var s = d.getFullYear();
-		if(str.indexOf("" + s) > -1) return d;
-		d.setFullYear(d.getFullYear() + 100); return d;
-	}
-	var n = str.match(/\d+/g)||["2017","2","19","0","0","0"];
-	var out = new Date(+n[0], +n[1] - 1, +n[2], (+n[3]||0), (+n[4]||0), (+n[5]||0));
-	if(str.indexOf("Z") > -1) out = new Date(out.getTime() - out.getTimezoneOffset() * 60 * 1000);
-	return out;
+	var m = str.match(pdre1);
+	if(m) return new Date((date1904 ? dnthresh2 : dnthresh1) + ((parseInt(m[1], 10)*60 + parseInt(m[2], 10))*60 + (m[3] ? parseInt(m[3].slice(1), 10) : 0))*1000 + (m[4] ? parseInt((m[4]+"000").slice(1,4), 10) : 0));
+	m = str.match(pdre2);
+	if(m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], 0, 0, 0, 0));
+	/* TODO: 1900-02-29T00:00:00.000 should return a flag to treat as a date code (affects xlml) */
+	m = str.match(pdre3);
+	if(m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], ((m[6] && parseInt(m[6].slice(1), 10))|| 0), ((m[7] && parseInt(m[7].slice(1), 10))||0)));
+	var d = new Date(str);
+	return d;
 }
 
 function cc2str(arr, debomit) {
@@ -3366,8 +3375,18 @@ function cc2str(arr, debomit) {
 		return new TextDecoder("latin1").decode(arr).replace(/[€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ]/g, function(c) { return rev[c] || c; });
 	} catch(e) {}
 
-	var o = [];
-	for(var i = 0; i != arr.length; ++i) o.push(String.fromCharCode(arr[i]));
+	var o = [], i = 0;
+	// this cascade is for the browsers and runtimes of antiquity (and for modern runtimes that lack TextEncoder)
+	try {
+		for(i = 0; i < arr.length - 65536; i+=65536) o.push(String.fromCharCode.apply(0, arr.slice(i, i + 65536)));
+		o.push(String.fromCharCode.apply(0, arr.slice(i)));
+	} catch(e) { try {
+			for(; i < arr.length - 16384; i+=16384) o.push(String.fromCharCode.apply(0, arr.slice(i, i + 16384)));
+			o.push(String.fromCharCode.apply(0, arr.slice(i)));
+		} catch(e) {
+			for(; i != arr.length; ++i) o.push(String.fromCharCode(arr[i]));
+		}
+	}
 	return o.join("");
 }
 
@@ -3397,32 +3416,49 @@ function fuzzynum(s) {
 
 /* NOTE: Chrome rejects bare times like 1:23 PM */
 var FDRE1 = /^(0?\d|1[0-2])(?:|:([0-5]?\d)(?:|(\.\d+)(?:|:([0-5]?\d))|:([0-5]?\d)(|\.\d+)))\s+([ap])m?$/;
+var FDRE2 = /^([01]?\d|2[0-3])(?:|:([0-5]?\d)(?:|(\.\d+)(?:|:([0-5]?\d))|:([0-5]?\d)(|\.\d+)))$/;
+var FDISO = /^(\d+)-(\d+)-(\d+)[T ](\d+):(\d+)(:\d+)(\.\d+)?[Z]?$/; // YYYY-mm-dd(T or space)HH:MM:SS[.UUU][Z]
 
+/* TODO: 1904 adjustment */
+var utc_append_works = new Date("6/9/69 00:00 UTC").valueOf() == -17798400000;
 function fuzzytime1(M)  {
-    /* TODO: 1904 adjustment, keep in sync with base date */
-    if(!M[2]) return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), 0, 0, 0);
-    if(M[3]) {
-        if(M[4]) return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[4], parseFloat(M[3])*1000);
-        else return new Date(1899,11,30,(M[7] == "p" ? 12 : 0), +M[1], +M[2], parseFloat(M[3])*1000);
-    }
-    else if(M[5]) return new Date(1899,11,30, (+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[5], M[6] ? parseFloat(M[6]) * 1000 : 0);
-    else return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], 0, 0);
+	if(!M[2]) return new Date(Date.UTC(1899,11,31,(+M[1]%12) + (M[7] == "p" ? 12 : 0), 0, 0, 0));
+	if(M[3]) {
+			if(M[4]) return new Date(Date.UTC(1899,11,31,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[4], parseFloat(M[3])*1000));
+			else return new Date(Date.UTC(1899,11,31,(M[7] == "p" ? 12 : 0), +M[1], +M[2], parseFloat(M[3])*1000));
+	}
+	else if(M[5]) return new Date(Date.UTC(1899,11,31, (+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[5], M[6] ? parseFloat(M[6]) * 1000 : 0));
+	else return new Date(Date.UTC(1899,11,31,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], 0, 0));
+}
+function fuzzytime2(M)  {
+	if(!M[2]) return new Date(Date.UTC(1899,11,31,+M[1], 0, 0, 0));
+	if(M[3]) {
+			if(M[4]) return new Date(Date.UTC(1899,11,31,+M[1], +M[2], +M[4], parseFloat(M[3])*1000));
+			else return new Date(Date.UTC(1899,11,31,0, +M[1], +M[2], parseFloat(M[3])*1000));
+	}
+	else if(M[5]) return new Date(Date.UTC(1899,11,31, +M[1], +M[2], +M[5], M[6] ? parseFloat(M[6]) * 1000 : 0));
+	else return new Date(Date.UTC(1899,11,31,+M[1], +M[2], 0, 0));
 }
 var lower_months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 function fuzzydate(s) {
+	// See issue 2863 -- this is technically not supported in Excel but is otherwise useful
+	if(FDISO.test(s)) return s.indexOf("Z") == -1 ? local_to_utc(new Date(s)) : new Date(s);
 	var lower = s.toLowerCase();
 	var lnos = lower.replace(/\s+/g, " ").trim();
 	var M = lnos.match(FDRE1);
 	if(M) return fuzzytime1(M);
-
-	var o = new Date(s), n = new Date(NaN);
+	M = lnos.match(FDRE2);
+	if(M) return fuzzytime2(M);
+	M = lnos.match(pdre3);
+	if(M) return new Date(Date.UTC(+M[1], +M[2]-1, +M[3], +M[4], +M[5], ((M[6] && parseInt(M[6].slice(1), 10))|| 0), ((M[7] && parseInt(M[7].slice(1), 10))||0)));
+	var o = new Date(utc_append_works && s.indexOf("UTC") == -1 ? s + " UTC": s), n = new Date(NaN);
 	var y = o.getYear(), m = o.getMonth(), d = o.getDate();
 	if(isNaN(d)) return n;
 	if(lower.match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/)) {
 		lower = lower.replace(/[^a-z]/g,"").replace(/([^a-z]|^)[ap]m?([^a-z]|$)/,"");
 		if(lower.length > 3 && lower_months.indexOf(lower) == -1) return n;
 	} else if(lower.replace(/[ap]m?/, "").match(/[a-z]/)) return n;
-	if(y < 0 || y > 8099 || s.match(/[^-0-9:,\/\\]/)) return n;
+	if(y < 0 || y > 8099 || s.match(/[^-0-9:,\/\\\ ]/)) return n;
 	return o;
 }
 
@@ -3435,6 +3471,13 @@ var split_regex = (function() {
 		return o;
 	};
 })();
+
+function utc_to_local(utc) {
+	return new Date(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate(), utc.getUTCHours(), utc.getUTCMinutes(), utc.getUTCSeconds(), utc.getUTCMilliseconds());
+}
+function local_to_utc(local) {
+	return new Date(Date.UTC(local.getFullYear(), local.getMonth(), local.getDate(), local.getHours(), local.getMinutes(), local.getSeconds(), local.getMilliseconds()));
+}
 function getdatastr(data) {
 	if(!data) return null;
 	if(data.content && data.type) return cc2str(data.content, true);
@@ -4354,6 +4397,7 @@ function sheet_add_aoa(_ws, data, opts) {
 				else if(typeof cell.v === 'boolean') cell.t = 'b';
 				else if(cell.v instanceof Date) {
 					cell.z = o.dateNF || table_fmt[14];
+					if(!o.UTC) cell.v = local_to_utc(cell.v);
 					if(o.cellDates) { cell.t = 'd'; cell.w = SSF_format(cell.z, datenum(cell.v, o.date1904)); }
 					else { cell.t = 'n'; cell.v = datenum(cell.v, o.date1904); cell.w = SSF_format(cell.z, cell.v); }
 				}
@@ -5619,7 +5663,10 @@ var fields = [], field = ({});
 					if(s.trim().length) out[R][C] = s.replace(/\s+$/,"");
 					break;
 				case 'D':
-					if(s.length === 8) out[R][C] = new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8));
+					if(s.length === 8) {
+						out[R][C] = new Date(Date.UTC(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8), 0, 0, 0, 0));
+						if(!(opts && opts.UTC)) { out[R][C] = utc_to_local(out[R][C]); }
+					}
 					else out[R][C] = s;
 					break;
 				case 'F': out[R][C] = parseFloat(s.trim()); break;
@@ -5642,7 +5689,12 @@ var fields = [], field = ({});
 					// NOTE: dBASE specs appear to be incorrect
 					out[R][C] = new Date(dd.read_shift(-8, 'f') - 0x388317533400);
 					break;
-				case 'T': out[R][C] = new Date((dd.read_shift(4) - 0x253D8C) * 0x5265C00 + dd.read_shift(4)); break;
+				case 'T': {
+					var hi = dd.read_shift(4), lo = dd.read_shift(4);
+					if(hi == 0 && lo == 0) break;
+					out[R][C] = new Date((hi - 0x253D8C) * 0x5265C00 + lo);
+					if(!(opts && opts.UTC)) out[R][C] = utc_to_local(out[R][C]);
+				} break;
 				case 'Y': out[R][C] = dd.read_shift(4,'i')/1e4 + (dd.read_shift(4, 'i')/1e4)*Math.pow(2,32); break;
 				case 'O': out[R][C] = -dd.read_shift(-8, 'f'); break;
 				case 'B': if(vfp && fields[C].len == 8) { out[R][C] = dd.read_shift(8,'f'); break; }
@@ -5845,6 +5897,8 @@ var SYLK = (function() {
 	var sylk_char_fn = function(_, $1){ var o = sylk_escapes[$1]; return typeof o == "number" ? _getansi(o) : o; };
 	var decode_sylk_char = function($$, $1, $2) { var newcc = (($1.charCodeAt(0) - 0x20)<<4) | ($2.charCodeAt(0) - 0x30); return newcc == 59 ? $$ : _getansi(newcc); };
 	sylk_escapes["|"] = 254;
+	/* TODO: evert the escape map */
+	var encode_sylk_str = function($$) { return $$.replace(/\n/g, "\x1b :").replace(/\r/g, "\x1b ="); };
 	/* https://oss.sheetjs.com/notes/sylk/ for more details */
 	function sylk_to_aoa(d, opts) {
 		switch(opts.type) {
@@ -5897,8 +5951,9 @@ var SYLK = (function() {
 			// case 'NU': // ??
 			case 'C': /* cell */
 			var C_seen_K = false, C_seen_X = false, C_seen_S = false, C_seen_E = false, _R = -1, _C = -1, formula = "", cell_t = "z";
+			var cmnt = "";
 			for(rj=1; rj<record.length; ++rj) switch(record[rj].charAt(0)) {
-				case 'A': break; // TODO: comment
+				case 'A': cmnt = record[rj].slice(1); break; // TODO: comment
 				case 'X': C = parseInt(record[rj].slice(1), 10)-1; C_seen_X = true; break;
 				case 'Y':
 					R = parseInt(record[rj].slice(1), 10)-1; if(!C_seen_X) C = 0;
@@ -5910,10 +5965,9 @@ var SYLK = (function() {
 					else if(val === 'TRUE' || val === 'FALSE') { val = val === 'TRUE'; cell_t = "b"; }
 					else if(!isNaN(fuzzynum(val))) {
 						val = fuzzynum(val); cell_t = "n";
-						if(next_cell_format !== null && fmt_is_date(next_cell_format) && opts.cellDates) { val = numdate(wb.Workbook.WBProps.date1904 ? val + 1462 : val); cell_t = "d"; }
-					} else if(!isNaN(fuzzydate(val).getDate())) {
-						val = parseDate(val); cell_t = "d";
-						if(!opts.cellDates) { cell_t = "n"; val = datenum(val, wb.Workbook.WBProps.date1904); }
+						if(next_cell_format !== null && fmt_is_date(next_cell_format) && opts.cellDates) {
+							val = numdate(wb.Workbook.WBProps.date1904 ? val + 1462 : val); cell_t = typeof val == "number" ? "n" : "d";
+						}
 					}
 					if(typeof $cptable !== 'undefined' && typeof val == "string" && ((opts||{}).type != "string") && (opts||{}).codepage) val = $cptable.utils.decode(opts.codepage, val);
 					C_seen_K = true;
@@ -5948,6 +6002,10 @@ var SYLK = (function() {
 			if(formula) {
 				if(!arr[R][C]) arr[R][C] = { t: 'n', f: formula };
 				else arr[R][C].f = formula;
+			}
+			if(cmnt) {
+				if(!arr[R][C]) arr[R][C] = { t: 'z' };
+				arr[R][C].c = [{a:"SheetJSYLK", t: cmnt}];
 			}
 			break;
 			case 'F': /* Format */
@@ -6010,7 +6068,7 @@ var SYLK = (function() {
 		return outwb;
 	}
 
-	function write_ws_cell_sylk(cell, ws, R, C) {
+	function write_ws_cell_sylk(cell, ws, R, C, opts, date1904) {
 		var o = "C;Y" + (R+1) + ";X" + (C+1) + ";K";
 		switch(cell.t) {
 			case 'n':
@@ -6018,9 +6076,16 @@ var SYLK = (function() {
 				if(cell.f && !cell.F) o += ";E" + a1_to_rc(cell.f, {r:R, c:C}); break;
 			case 'b': o += cell.v ? "TRUE" : "FALSE"; break;
 			case 'e': o += cell.w || cell.v; break;
-			case 'd': o += '"' + (cell.w || cell.v) + '"'; break;
+			case 'd': o += datenum(parseDate(cell.v, date1904), date1904); break;
 			case 's': o += '"' + (cell.v == null ? "" : String(cell.v)).replace(/"/g,"").replace(/;/g, ";;") + '"'; break;
 		}
+		return o;
+	}
+
+	function write_ws_cmnt_sylk(cmnt, R, C) {
+		var o = "C;Y" + (R+1) + ";X" + (C+1) + ";A";
+		/* TODO: max length? */
+		o += encode_sylk_str(cmnt.map(function(c) { return c.t; }).join(""));
 		return o;
 	}
 
@@ -6048,6 +6113,7 @@ var SYLK = (function() {
 	}
 
 	function sheet_to_sylk(ws, opts, wb) {
+		if(!opts) opts = {}; opts._formats = ["General"];
 		/* TODO: codepage */
 		var preamble = ["ID;PSheetJS;N;E"], o = [];
 		var r = safe_decode_range(ws['!ref']), cell;
@@ -6055,23 +6121,44 @@ var SYLK = (function() {
 		var RS = "\r\n";
 		var d1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 
+		var _lastfmt = "General";
 		preamble.push("P;PGeneral");
+		/* Excel has been inconsistent in comment placement */
+		var R = r.s.r, C = r.s.c, p = [];
+		for(R = r.s.r; R <= r.e.r; ++R) {
+			if(dense && !ws["!data"][R]) continue;
+			p = [];
+			for(C = r.s.c; C <= r.e.c; ++C) {
+				cell = dense ? ws["!data"][R][C] : ws[encode_col(C) + encode_row(R)];
+				if(!cell || !cell.c) continue;
+				p.push(write_ws_cmnt_sylk(cell.c, R, C));
+			}
+			if(p.length) o.push(p.join(RS));
+		}
+		for(R = r.s.r; R <= r.e.r; ++R) {
+			if(dense && !ws["!data"][R]) continue;
+			p = [];
+			for(C = r.s.c; C <= r.e.c; ++C) {
+				cell = dense ? ws["!data"][R][C] : ws[encode_col(C) + encode_row(R)];
+				if(!cell || (cell.v == null && (!cell.f || cell.F))) continue;
+				if((cell.z||(cell.t == "d" ? table_fmt[14] : "General")) != _lastfmt) {
+					var ifmt = opts._formats.indexOf(cell.z);
+					if(ifmt == -1) { opts._formats.push(cell.z); ifmt = opts._formats.length - 1; preamble.push("P;P" + cell.z.replace(/;/g, ";;")); }
+					p.push("F;P" + ifmt + ";Y" + (R+1) + ";X" + (C+1));
+				}
+				p.push(write_ws_cell_sylk(cell, ws, R, C, opts, d1904));
+			}
+			o.push(p.join(RS));
+		}
+
 		preamble.push("F;P0;DG0G8;M255");
 		if(ws['!cols']) write_ws_cols_sylk(preamble, ws['!cols']);
 		if(ws['!rows']) write_ws_rows_sylk(preamble, ws['!rows']);
 
 		preamble.push("B;Y" + (r.e.r - r.s.r + 1) + ";X" + (r.e.c - r.s.c + 1) + ";D" + [r.s.c,r.s.r,r.e.c,r.e.r].join(" "));
 		preamble.push("O;L;D;B" + (d1904 ? ";V4" : "") + ";K47;G100 0.001");
-		for(var R = r.s.r; R <= r.e.r; ++R) {
-			if(dense && !ws["!data"][R]) continue;
-			var p = [];
-			for(var C = r.s.c; C <= r.e.c; ++C) {
-				cell = dense ? ws["!data"][R][C] : ws[encode_col(C) + encode_row(R)];
-				if(!cell || (cell.v == null && (!cell.f || cell.F))) continue;
-				p.push(write_ws_cell_sylk(cell, ws, R, C, opts)); // TODO: pass date1904 info
-			}
-			o.push(p.join(RS));
-		}
+
+		delete opts._formats;
 		return preamble.join(RS) + RS + o.join(RS) + RS + "E" + RS;
 	}
 
@@ -6111,7 +6198,10 @@ var DIF = (function() {
 					if(data === 'TRUE') arr[R][C] = true;
 					else if(data === 'FALSE') arr[R][C] = false;
 					else if(!isNaN(fuzzynum(value))) arr[R][C] = fuzzynum(value);
-					else if(!isNaN(fuzzydate(value).getDate())) arr[R][C] = parseDate(value);
+					else if(!isNaN(fuzzydate(value).getDate())) {
+						arr[R][C] = parseDate(value);
+						if(!(opts && opts.UTC)) { arr[R][C] = utc_to_local(arr[R][C]); }
+					}
 					else arr[R][C] = value;
 					++C; break;
 				case 1:
@@ -6392,9 +6482,11 @@ var PRN = (function() {
 		var start = 0, end = 0, sepcc = sep.charCodeAt(0), instr = false, cc=0, startcc=str.charCodeAt(0);
 		var _re = o.dateNF != null ? dateNF_regex(o.dateNF) : null;
 		function finish_cell() {
+			/* TODO: fuzzy parsers should pass back assumed number format */
 			var s = str.slice(start, end); if(s.slice(-1) == "\r") s = s.slice(0, -1);
 			var cell = ({});
 			if(s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') s = s.slice(1,-1).replace(/""/g,'"');
+			if(o.cellText !== false) cell.w = s;
 			if(s.length === 0) cell.t = 'z';
 			else if(o.raw) { cell.t = 's'; cell.v = s; }
 			else if(s.trim().length === 0) { cell.t = 's'; cell.v = s; }
@@ -6404,14 +6496,14 @@ var PRN = (function() {
 				else { cell.t = 's'; cell.v = s; } }
 			else if(s == "TRUE") { cell.t = 'b'; cell.v = true; }
 			else if(s == "FALSE") { cell.t = 'b'; cell.v = false; }
-			else if(!isNaN(v = fuzzynum(s))) { cell.t = 'n'; if(o.cellText !== false) cell.w = s; cell.v = v; }
+			else if(!isNaN(v = fuzzynum(s))) { cell.t = 'n'; cell.v = v; }
 			else if(!isNaN((v = fuzzydate(s)).getDate()) || _re && s.match(_re)) {
 				cell.z = o.dateNF || table_fmt[14];
-				var k = 0;
-				if(_re && s.match(_re)){ s=dateNF_fix(s, o.dateNF, (s.match(_re)||[])); k=1; v = parseDate(s, k); }
+				if(_re && s.match(_re)){ var news=dateNF_fix(s, o.dateNF, (s.match(_re)||[])); v = parseDate(news); if(o && o.UTC === false) v = utc_to_local(v); }
+				else if(o && o.UTC === false) v = utc_to_local(v);
+				else if(o.cellText !== false && o.dateNF) cell.w = SSF_format(cell.z, v);
 				if(o.cellDates) { cell.t = 'd'; cell.v = v; }
 				else { cell.t = 'n'; cell.v = datenum(v); }
-				if(o.cellText !== false) cell.w = SSF_format(cell.z, cell.v instanceof Date ? datenum(cell.v):cell.v);
 				if(!o.cellNF) delete cell.z;
 			} else {
 				cell.t = 's';
@@ -7735,7 +7827,45 @@ function parse_drawing(data, rels) {
 }
 
 /* L.5.5.2 SpreadsheetML Comments + VML Schema */
-function write_vml(rId, comments) {
+var shapevmlregex = /<(?:\w+:)?shape(?:[^\w][^>]*)?>([\s\S]*?)<\/(?:\w+:)?shape>/g;
+function parse_vml(data, sheet, comments) {
+	var cidx = 0;
+	(data.match(shapevmlregex)||[]).forEach(function(m) {
+		var type = "";
+		var hidden = true;
+		var aidx = -1;
+		var R = -1, C = -1;
+		m.replace(tagregex, function(x, idx) {
+			var y = parsexmltag(x);
+			switch(strip_ns(y[0])) {
+				case '<ClientData': if(y.ObjectType) type = y.ObjectType; break;
+
+				case '<Visible': case '<Visible/>': hidden = false; break;
+
+				case '<Row': case '<Row>': aidx = idx + x.length; break;
+				case '</Row>': R = +m.slice(aidx, idx).trim(); break;
+
+				case '<Column': case '<Column>': aidx = idx + x.length; break;
+				case '</Column>': C = +m.slice(aidx, idx).trim(); break;
+			}
+			return "";
+		});
+		switch(type) {
+		case 'Note':
+			var cell = ws_get_cell_stub(sheet, ((R>=0 && C>=0) ? encode_cell({r:R,c:C}) : comments[cidx].ref));
+			if(cell.c) {
+				cell.c.hidden = hidden;
+			}
+			++cidx;
+			break;
+		}
+
+	});
+}
+
+
+/* comment boxes */
+function write_vml(rId, comments, ws) {
 	var csize = [21600, 21600];
 	/* L.5.2.1.2 Path Attribute */
 	var bbox = ["m0,0l0",csize[1],csize[0],csize[1],csize[0],"0xe"].join(",");
@@ -7757,7 +7887,7 @@ function write_vml(rId, comments) {
 	return o.join("");
 }
 
-function write_vml_comment(x, _shapeid) {
+function write_vml_comment(x, _shapeid, ws) {
 	var c = decode_cell(x[0]);
 	var fillopts = {'color2':"#BEFF82", 'type':"gradient"};
 	if(fillopts.type == "gradient") fillopts.angle = "-180";
@@ -7895,6 +8025,7 @@ function write_comments_xml(data) {
 				o.push('</text></comment>');
 			});
 		} else {
+			if(d[1][0] && d[1][0].T && d[1][0].ID) lastauthor = iauthor.indexOf("tc=" + d[1][0].ID);
 			/* based on Threaded Comments -> Comments projection */
 			o.push('<comment ref="' + d[0] + '" authorId="' + lastauthor + '"><text>');
 			var t = "Comment:\n    " + (ts[0]) + "\n";
@@ -8133,7 +8264,7 @@ function ods_to_csf_3D(r) {
 }
 
 function csf_to_ods_3D(r) {
-	return r.replace(/!/,".");
+	return r.replace(/!/,".").replace(/:/, ":.");
 }
 
 var strs = {}; // shared strings
@@ -8219,7 +8350,7 @@ function get_cell_style(styles, cell, opts) {
 	return len;
 }
 
-function safe_format(p, fmtid, fillid, opts, themes, styles) {
+function safe_format(p, fmtid, fillid, opts, themes, styles, date1904) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
 	} catch(e) { if(opts.WTF) throw e; }
@@ -8234,14 +8365,14 @@ function safe_format(p, fmtid, fillid, opts, themes, styles) {
 				else p.w = SSF_general_num(p.v);
 			}
 			else if(p.t === 'd') {
-				var dd = datenum(p.v);
+				var dd = datenum(p.v, !!date1904);
 				if((dd|0) === dd) p.w = dd.toString(10);
 				else p.w = SSF_general_num(dd);
 			}
 			else if(p.v === undefined) return "";
 			else p.w = SSF_general(p.v,_ssfopts);
 		}
-		else if(p.t === 'd') p.w = SSF_format(fmtid,datenum(p.v),_ssfopts);
+		else if(p.t === 'd') p.w = SSF_format(fmtid,datenum(p.v, !!date1904),_ssfopts);
 		else p.w = SSF_format(fmtid,p.v,_ssfopts);
 	} catch(e) { if(opts.WTF) throw e; }
 	if(!opts.cellStyles) return;
@@ -8321,7 +8452,7 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	}
 
 	/* 18.3.1.80 sheetData CT_SheetData ? */
-	if(mtch) parse_ws_xml_data(mtch[1], s, opts, refguess, themes, styles);
+	if(mtch) parse_ws_xml_data(mtch[1], s, opts, refguess, themes, styles, wb);
 
 	/* 18.3.1.2  autoFilter CT_AutoFilter */
 	var afilter = data2.match(afregex);
@@ -8341,6 +8472,10 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
 
+	/* legacyDrawing */
+	var m;
+	if((m = data2.match(/legacyDrawing r:id="(.*?)"/))) s['!legrel'] = m[1];
+
 	if(opts && opts.nodim) refguess.s.c = refguess.s.r = 0;
 	if(!s["!ref"] && refguess.e.c >= refguess.s.c && refguess.e.r >= refguess.s.r) s["!ref"] = encode_range(refguess);
 	if(opts.sheetRows > 0 && s["!ref"]) {
@@ -8357,6 +8492,7 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	}
 	if(columns.length > 0) s["!cols"] = columns;
 	if(merges.length > 0) s["!merges"] = merges;
+	if(rels['!id'][s['!legrel']]) s['!legdrawel'] = rels['!id'][s['!legrel']];
 	return s;
 }
 
@@ -8523,21 +8659,27 @@ function write_ws_xml_sheetviews(ws, opts, idx, wb) {
 	return writextag("sheetViews", writextag("sheetView", null, sview), {});
 }
 
-function write_ws_xml_cell(cell, ref, ws, opts) {
+function write_ws_xml_cell(cell, ref, ws, opts, idx, wb, date1904) {
 	if(cell.c) ws['!comments'].push([ref, cell.c]);
 	if((cell.v === undefined || cell.t === "z" && !(opts||{}).sheetStubs) && typeof cell.f !== "string" && typeof cell.z == "undefined") return "";
 	var vv = "";
 	var oldt = cell.t, oldv = cell.v;
 	if(cell.t !== "z") switch(cell.t) {
 		case 'b': vv = cell.v ? "1" : "0"; break;
-		case 'n': vv = ''+cell.v; break;
+		case 'n':
+			if(isNaN(cell.v)) { cell.t = "e"; vv = BErr[cell.v = 0x24]; } // #NUM!
+			else if(!isFinite(cell.v)) { cell.t = "e"; vv = BErr[cell.v = 0x07]; } // #DIV/0!
+			else vv = ''+cell.v; break;
 		case 'e': vv = BErr[cell.v]; break;
 		case 'd':
-			if(opts && opts.cellDates) vv = parseDate(cell.v, -1).toISOString();
-			else {
+			if(opts && opts.cellDates) {
+				var _vv = parseDate(cell.v, date1904);
+				vv = _vv.toISOString();
+				if(_vv.getUTCFullYear() < 1900) vv = vv.slice(vv.indexOf("T") + 1).replace("Z","");
+			} else {
 				cell = dup(cell);
 				cell.t = 'n';
-				vv = ''+(cell.v = datenum(parseDate(cell.v)));
+				vv = ''+(cell.v = datenum(parseDate(cell.v, date1904), date1904));
 			}
 			if(typeof cell.z === 'undefined') cell.z = table_fmt[14];
 			break;
@@ -8580,7 +8722,7 @@ var parse_ws_xml_data = (function() {
 	var refregex = /ref=["']([^"']*)["']/;
 	var match_v = matchtag("v"), match_f = matchtag("f");
 
-return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
+return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 	var ri = 0, x = "", cells = [], cref = [], idx=0, i=0, cc=0, d="", p;
 	var tag, tagr = 0, tagc = 0;
 	var sstr, ftag;
@@ -8591,6 +8733,7 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 	var dense = s["!data"] != null;
 	var rows = [], rowobj = {}, rowrite = false;
 	var sheetStubs = !!opts.sheetStubs;
+	var date1904 = !!((wb||{}).WBProps||{}).date1904;
 	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
@@ -8658,19 +8801,27 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 
 			if((cref=d.match(match_v))!= null && cref[1] !== '') p.v=unescapexml(cref[1]);
 			if(opts.cellFormula) {
-				if((cref=d.match(match_f))!= null && cref[1] !== '') {
-					/* TODO: match against XLSXFutureFunctions */
-					p.f=unescapexml(utf8read(cref[1]), true);
-					if(!opts.xlfn) p.f = _xlfn(p.f);
-					if(cref[0].indexOf('t="array"') > -1) {
-						p.F = (d.match(refregex)||[])[1];
-						if(p.F.indexOf(":") > -1) arrayf.push([safe_decode_range(p.F), p.F]);
-					} else if(cref[0].indexOf('t="shared"') > -1) {
-						// TODO: parse formula
-						ftag = parsexmltag(cref[0]);
-						var ___f = unescapexml(utf8read(cref[1]));
-						if(!opts.xlfn) ___f = _xlfn(___f);
-						sharedf[parseInt(ftag.si, 10)] = [ftag, ___f, tag.r];
+				if((cref=d.match(match_f))!= null ) {
+					if(cref[1] == "") {
+						if(cref[0].indexOf('t="shared"') > -1) {
+							// TODO: parse formula
+							ftag = parsexmltag(cref[0]);
+							if(sharedf[ftag.si]) p.f = shift_formula_xlsx(sharedf[ftag.si][1], sharedf[ftag.si][2]/*[0].ref*/, tag.r);
+						}
+					} else {
+						/* TODO: match against XLSXFutureFunctions */
+						p.f=unescapexml(utf8read(cref[1]), true);
+						if(!opts.xlfn) p.f = _xlfn(p.f);
+						if(cref[0].indexOf('t="array"') > -1) {
+							p.F = (d.match(refregex)||[])[1];
+							if(p.F.indexOf(":") > -1) arrayf.push([safe_decode_range(p.F), p.F]);
+						} else if(cref[0].indexOf('t="shared"') > -1) {
+							// TODO: parse formula
+							ftag = parsexmltag(cref[0]);
+							var ___f = unescapexml(utf8read(cref[1]));
+							if(!opts.xlfn) ___f = _xlfn(___f);
+							sharedf[parseInt(ftag.si, 10)] = [ftag, ___f, tag.r];
+						}
 					}
 				} else if((cref=d.match(/<f[^>]*\/>/))) {
 					ftag = parsexmltag(cref[0]);
@@ -8727,8 +8878,8 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 					break;
 				case 'b': p.v = parsexmlbool(p.v); break;
 				case 'd':
-					if(opts.cellDates) p.v = parseDate(p.v, 1);
-					else { p.v = datenum(parseDate(p.v, 1)); p.t = 'n'; }
+					if(opts.cellDates) p.v = parseDate(p.v, date1904);
+					else { p.v = datenum(parseDate(p.v, date1904), date1904); p.t = 'n'; }
 					break;
 				/* error string in .w, number in .v */
 				case 'e':
@@ -8747,8 +8898,8 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 					}
 				}
 			}
-			safe_format(p, fmtid, fillid, opts, themes, styles);
-			if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.t = 'd'; p.v = numdate(p.v); }
+			safe_format(p, fmtid, fillid, opts, themes, styles, date1904);
+			if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.v = numdate(p.v + (date1904 ? 1462 : 0)); p.t = typeof p.v == "number" ? 'n' : 'd'; }
 			if(tag.cm && opts.xlmeta) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];
 				if(cm && cm.type == 'XLDAPR') p.D = true;
@@ -8773,6 +8924,7 @@ function write_ws_xml_data(ws, opts, idx, wb) {
 	var o = [], r = [], range = safe_decode_range(ws['!ref']), cell="", ref, rr = "", cols = [], R=0, C=0, rows = ws['!rows'];
 	var dense = ws["!data"] != null;
 	var params = ({r:rr}), row, height = -1;
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	for(C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(R = range.s.r; R <= range.e.r; ++R) {
 		r = [];
@@ -8781,7 +8933,7 @@ function write_ws_xml_data(ws, opts, idx, wb) {
 			ref = cols[C] + rr;
 			var _cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 			if(_cell === undefined) continue;
-			if((cell = write_ws_xml_cell(_cell, ref, ws, opts, idx, wb)) != null) r.push(cell);
+			if((cell = write_ws_xml_cell(_cell, ref, ws, opts, idx, wb, date1904)) != null) r.push(cell);
 		}
 		if(r.length > 0 || (rows && rows[R])) {
 			params = ({r:rr});
@@ -9512,9 +9664,11 @@ function html_to_sheet(str, _opts) {
 			else if(!isNaN(fuzzynum(m))) o = {t:'n', v:fuzzynum(m)};
 			else if(!isNaN(fuzzydate(m).getDate())) {
 				o = ({t:'d', v:parseDate(m)});
+				if(opts.UTC === false) o.v = utc_to_local(o.v);
 				if(!opts.cellDates) o = ({t:'n', v:datenum(o.v)});
 				o.z = opts.dateNF || table_fmt[14];
 			}
+			if(o.cellText !== false) o.w = m;
 			if(dense) { if(!ws["!data"][R]) ws["!data"][R] = []; ws["!data"][R][C] = o; }
 			else ws[encode_cell({r:R, c:C})] = o;
 			C += CS;
@@ -9548,7 +9702,8 @@ function make_html_row(ws, r, R, o) {
 		if(o.editable) w = '<span contenteditable="true">' + w + '</span>';
 		else if(cell) {
 			sp["data-t"] = cell && cell.t || 'z';
-			if(cell.v != null) sp["data-v"] = cell.v;
+			// note: data-v is unaffected by the timezone interpretation
+			if(cell.v != null) sp["data-v"] = cell.v instanceof Date ? cell.v.toISOString() : cell.v;
 			if(cell.z != null) sp["data-z"] = cell.z;
 			if(cell.l && (cell.l.Target || "#").charAt(0) != "#") w = '<a href="' + escapehtml(cell.l.Target) +'">' + w + '</a>';
 		}
@@ -9654,6 +9809,7 @@ function sheet_add_dom(ws, table, _opts) {
 				else if(!isNaN(fuzzynum(v))) o = {t:'n', v:fuzzynum(v)};
 				else if(!isNaN(fuzzydate(v).getDate())) {
 					o = ({t:'d', v:parseDate(v)});
+					if(opts.UTC) o.v = local_to_utc(o.v);
 					if(!opts.cellDates) o = ({t:'n', v:datenum(o.v)});
 					o.z = opts.dateNF || table_fmt[14];
 				}
@@ -9958,8 +10114,8 @@ function parse_content_xml(d, _opts, _nfm) {
 		var ws = ({}); if(opts.dense) ws["!data"] = [];
 		var Rn, q;
 		var ctag = ({value:""});
-		var textp = "", textpidx = 0, textptag;
-		var textR = [];
+		var textp = "", textpidx = 0, textptag, oldtextp = "", oldtextpidx = 0;
+		var textR = [], oldtextR = [];
 		var R = -1, C = -1, range = {s: {r:1000000,c:10000000}, e: {r:0, c:0}};
 		var row_ol = 0;
 		var number_format_map = _nfm || {}, styles = {};
@@ -9973,7 +10129,6 @@ function parse_content_xml(d, _opts, _nfm) {
 		var creator = "", creatoridx = 0;
 		var isstub = false, intable = false;
 		var i = 0;
-		var baddate = 0;
 		xlmlregex.lastIndex = 0;
 		str = str.replace(/<!--([\s\S]*?)-->/mg,"").replace(/<!DOCTYPE[^\[]*\[[^\]]*\]>/gm,"");
 		while((Rn = xlmlregex.exec(str))) switch((Rn[3]=Rn[3].replace(/_.*$/,""))) {
@@ -10044,7 +10199,7 @@ function parse_content_xml(d, _opts, _nfm) {
 					C+= colpeat-1;
 				} else if(Rn[1]!=='/') {
 					++C;
-					textp = ""; textpidx = 0; textR = [];
+					textp = oldtextp = ""; textpidx = oldtextpidx = 0; textR = []; oldtextR = [];
 					colpeat = 1;
 					var rptR = rowpeat ? R + rowpeat - 1 : R;
 					if(C > range.e.c) range.e.c = C;
@@ -10080,19 +10235,23 @@ function parse_content_xml(d, _opts, _nfm) {
 					/* 19.675.2 table:number-columns-repeated */
 					if(ctag['number-columns-repeated']) colpeat = parseInt(ctag['number-columns-repeated'], 10);
 
-					/* 19.385 office:value-type */
+					/* 19.385 office:value-type TODO: verify ODS and UOS */
 					switch(q.t) {
 						case 'boolean': q.t = 'b'; q.v = parsexmlbool(ctag['boolean-value']) || (+ctag['boolean-value'] >= 1); break;
-						case 'float': q.t = 'n'; q.v = parseFloat(ctag.value); break;
+						case 'float': q.t = 'n'; q.v = parseFloat(ctag.value);
+							if(opts.cellDates && q.z && fmt_is_date(q.z)) { q.v = numdate(q.v + (WB.WBProps.date1904 ? 1462 : 0)); q.t = typeof q.v == "number" ? 'n' : 'd'; }
+							break;
 						case 'percentage': q.t = 'n'; q.v = parseFloat(ctag.value); break;
 						case 'currency': q.t = 'n'; q.v = parseFloat(ctag.value); break;
-						case 'date': q.t = 'd'; q.v = parseDate(ctag['date-value']);
-							if(!opts.cellDates) { q.t = 'n'; q.v = datenum(q.v, WB.WBProps.date1904) - baddate; }
+						case 'date': q.t = 'd'; q.v = parseDate(ctag['date-value'], WB.WBProps.date1904);
+							if(!opts.cellDates) { q.t = 'n'; q.v = datenum(q.v, WB.WBProps.date1904); }
 							if(!q.z) q.z = 'm/d/yy'; break;
+						/* NOTE: for `time`, Excel ODS export incorrectly uses durations relative to 1900 epoch even if 1904 is specified */
 						case 'time': q.t = 'n'; q.v = parse_isodur(ctag['time-value'])/86400;
-							if(opts.cellDates) { q.t = 'd'; q.v = numdate(q.v); }
+							if(opts.cellDates) { q.v = numdate(q.v); q.t = typeof q.v == "number" ? 'n' : 'd'; }
 							if(!q.z) q.z = 'HH:MM:SS'; break;
-						case 'number': q.t = 'n'; q.v = parseFloat(ctag['数据数值']); break;
+						case 'number': q.t = 'n'; q.v = parseFloat(ctag['数据数值']);
+							break;
 						default:
 							if(q.t === 'string' || q.t === 'text' || !q.t) {
 								q.t = 's';
@@ -10153,10 +10312,17 @@ function parse_content_xml(d, _opts, _nfm) {
 					if(textR.length) comment.R = textR;
 					comment.a = creator;
 					comments.push(comment);
+					textp = oldtextp; textpidx = oldtextpidx; textR = oldtextR;
 				}
-				else if(Rn[0].charAt(Rn[0].length-2) !== '/') {state.push([Rn[3], false]);}
+				else if(Rn[0].charAt(Rn[0].length-2) !== '/') {
+					state.push([Rn[3], false]);
+					var annotag = parsexmltag(Rn[0], true);
+					/* office:display TODO: check if there is a global override */
+					if(!(annotag["display"] && parsexmlbool(annotag["display"]))) comments.hidden = true;
+					oldtextp = textp; oldtextpidx = textpidx; oldtextR = textR;
+					textp = ""; textpidx = 0; textR = [];
+				}
 				creator = ""; creatoridx = 0;
-				textp = ""; textpidx = 0; textR = [];
 				break;
 
 			case 'creator': // 4.3.2.7 <dc:creator>
@@ -10282,9 +10448,7 @@ function parse_content_xml(d, _opts, _nfm) {
 			case 'null-date': // 9.4.2 <table:null-date>
 				tag = parsexmltag(Rn[0], false);
 				switch(tag["date-value"]) {
-					case "1904-01-01": WB.WBProps.date1904 = true;
-					/* falls through */
-					case "1900-01-01": baddate = 0;
+					case "1904-01-01": WB.WBProps.date1904 = true; break;
 				}
 				break;
 
@@ -10306,6 +10470,9 @@ function parse_content_xml(d, _opts, _nfm) {
 				if(Rn[1]==='/' && (!ctag || !ctag['string-value'])) {
 					var ptp = parse_text_p(str.slice(textpidx,Rn.index), textptag);
 					textp = (textp.length > 0 ? textp + "\n" : "") + ptp[0];
+				} else if(Rn[0].slice(-2) == "/>") {
+					/* TODO: is self-closing 文本串 valid? */
+					textp += "\n";
 				} else { textptag = parsexmltag(Rn[0], false); textpidx = Rn.index + Rn[0].length; }
 				break; // <text:p>
 			case 's': break; // <text:s>
@@ -10590,7 +10757,9 @@ function write_number_format_ods(nf, nfidx) {
 					while(nf[++i] != '"' || nf[++i] == '"') c += nf[i]; --i;
 					payload += '<number:text>' + escapexml(c.slice(1).replace(/""/g, '"')) + '</number:text>';
 					break;
-				case '/': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '\\': c = nf[++i];
+					payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '/': case ':': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
 				default: console.error("unrecognized character " + c + " in ODF format " + nf);
 			}
 			if(!has_time) break j;
@@ -10617,7 +10786,7 @@ function write_number_format_ods(nf, nfidx) {
 					while(nf[++i] != '"' || nf[++i] == '"') c += nf[i]; --i;
 					payload += '<number:text>' + escapexml(c.slice(1).replace(/""/g, '"')) + '</number:text>';
 					break;
-				case '/': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
+				case '/': case ':': payload += '<number:text>' + escapexml(c) + '</number:text>'; break;
 				case "a":
 					if(nf.slice(i, i+3).toLowerCase() == "a/p") { payload += '<number:am-pm/>'; i += 2; break; } // Note: ODF does not support A/P
 					if(nf.slice(i, i+5).toLowerCase() == "am/pm")  { payload += '<number:am-pm/>'; i += 4; break; }
@@ -10673,10 +10842,15 @@ function write_number_format_ods(nf, nfidx) {
 }
 
 function write_names_ods(Names, SheetNames, idx) {
-	var scoped = Names.filter(function(name) { return name.Sheet == (idx == -1 ? null : idx); });
+	//var scoped = Names.filter(function(name) { return name.Sheet == (idx == -1 ? null : idx); });
+	var scoped = []; for(var namei = 0; namei < Names.length; ++namei) {
+		var name = Names[namei];
+		if(!name) continue;
+		if(name.Sheet == (idx == -1 ? null : idx)) scoped.push(name);
+	}
 	if(!scoped.length) return "";
 	return "      <table:named-expressions>\n" + scoped.map(function(name) {
-		var odsref =  csf_to_ods_3D(name.Ref);
+		var odsref =  (idx == -1 ? "$" : "") + csf_to_ods_3D(name.Ref);
 		return "        " + writextag("table:named-range", null, {
 			"table:name": name.Name,
 			"table:cell-range-address": odsref,
@@ -10695,8 +10869,7 @@ var write_content_ods = /* @__PURE__ */(function() {
 	};
 
 	var null_cell_xml = '          <table:table-cell />\n';
-	var covered_cell_xml = '          <table:covered-table-cell/>\n';
-	var write_ws = function(ws, wb, i, opts, nfs) {
+	var write_ws = function(ws, wb, i, opts, nfs, date1904) {
 		/* Section 9 Tables */
 		var o = [];
 		o.push('      <table:table table:name="' + escapexml(wb.SheetNames[i]) + '" table:style-name="ta1">\n');
@@ -10727,7 +10900,7 @@ var write_content_ods = /* @__PURE__ */(function() {
 					ct['table:number-rows-spanned'] =    (marr[mi].e.r - marr[mi].s.r + 1);
 					break;
 				}
-				if(skip) { o.push(covered_cell_xml); continue; }
+				if(skip) { o.push('          <table:covered-table-cell/>\n'); continue; }
 				var ref = encode_cell({r:R, c:C}), cell = dense ? (ws["!data"][R]||[])[C]: ws[ref];
 				if(cell && cell.f) {
 					ct['table:formula'] = escapexml(csf_to_ods_formula(cell.f));
@@ -10756,13 +10929,13 @@ var write_content_ods = /* @__PURE__ */(function() {
 						ct['office:value-type'] = "string";
 						break;
 					case 'd':
-						textp = (cell.w||(parseDate(cell.v).toISOString()));
+						textp = (cell.w||(parseDate(cell.v, date1904).toISOString()));
 						ct['office:value-type'] = "date";
-						ct['office:date-value'] = (parseDate(cell.v).toISOString());
+						ct['office:date-value'] = (parseDate(cell.v, date1904).toISOString());
 						ct['table:style-name'] = "ce1";
 						break;
-					//case 'e':
-					default: o.push(null_cell_xml); continue;
+					//case 'e': // TODO: translate to ODS errors
+					default: o.push(null_cell_xml); continue; // TODO: empty cell with comments
 				}
 				var text_p = write_text_p(textp);
 				if(cell.l && cell.l.Target) {
@@ -10773,7 +10946,17 @@ var write_content_ods = /* @__PURE__ */(function() {
 					text_p = writextag('text:a', text_p, {'xlink:href': _tgt.replace(/&/g, "&amp;")});
 				}
 				if(nfs[cell.z]) ct["table:style-name"] = "ce" + nfs[cell.z].slice(1);
-				o.push('          ' + writextag('table:table-cell', writextag('text:p', text_p, {}), ct) + '\n');
+				var payload = writextag('text:p', text_p, {});
+				if(cell.c) {
+					var acreator = "", apayload = "", aprops = {};
+					for(var ci = 0; ci < cell.c.length; ++ci) {
+						if(!acreator && cell.c[ci].a) acreator = cell.c[ci].a;
+						apayload += "<text:p>" + write_text_p(cell.c[ci].t) + "</text:p>";
+					}
+					if(!cell.c.hidden) aprops["office:display"] = true;
+					payload = writextag('office:annotation', apayload, aprops) + payload;
+				}
+				o.push('          ' + writextag('table:table-cell', payload, ct) + '\n');
 			}
 			o.push('        </table:table-row>\n');
 		}
@@ -10918,7 +11101,7 @@ var write_content_ods = /* @__PURE__ */(function() {
 		o.push('  <office:body>\n');
 		o.push('    <office:spreadsheet>\n');
 		if(((wb.Workbook||{}).WBProps||{}).date1904) o.push('      <table:calculation-settings table:case-sensitive="false" table:search-criteria-must-apply-to-whole-cell="true" table:use-wildcards="true" table:use-regular-expressions="false" table:automatic-find-labels="false">\n        <table:null-date table:date-value="1904-01-01"/>\n      </table:calculation-settings>\n');
-		for(var i = 0; i != wb.SheetNames.length; ++i) o.push(write_ws(wb.Sheets[wb.SheetNames[i]], wb, i, opts, nfs));
+		for(var i = 0; i != wb.SheetNames.length; ++i) o.push(write_ws(wb.Sheets[wb.SheetNames[i]], wb, i, opts, nfs, ((wb.Workbook||{}).WBProps||{}).date1904));
 		if((wb.Workbook||{}).Names) o.push(write_names_ods(wb.Workbook.Names, wb.SheetNames, -1));
 		o.push('    </office:spreadsheet>\n');
 		o.push('  </office:body>\n');
@@ -11032,6 +11215,13 @@ function safe_parse_wbrels(wbrels, sheets) {
 	return !wbrels || wbrels.length === 0 ? null : wbrels;
 }
 
+function parse_sheet_legacy_drawing(sheet, type, zip, path, idx, opts, wb, comments) {
+	if(!sheet || !sheet['!legdrawel']) return;
+	var dfile = resolve_path(sheet['!legdrawel'].Target, path);
+	var draw = getzipstr(zip, dfile, true);
+	if(draw) parse_vml(utf8read(draw), sheet, comments||[]);
+}
+
 function safe_parse_sheet(zip, path, relsPath, sheet, idx, sheetRels, sheets, stype, opts, wb, themes, styles) {
 	try {
 		sheetRels[sheet]=parse_rels(getzipstr(zip, relsPath, true), path);
@@ -11070,6 +11260,7 @@ function safe_parse_sheet(zip, path, relsPath, sheet, idx, sheetRels, sheets, st
 			}
 		});
 		if(tcomments && tcomments.length) sheet_insert_comments(_ws, tcomments, true, opts.people || []);
+		parse_sheet_legacy_drawing(_ws, stype, zip, path, idx, opts, wb, comments);
 	} catch(e) { if(opts.WTF) throw e; }
 }
 
@@ -11369,6 +11560,9 @@ f = "docProps/app.xml";
 		add_rels(opts.rels, 4, f, RELS.CUST_PROPS);
 	}
 
+	var people = ["SheetJ5"];
+	opts.tcid = 0;
+
 	for(rId=1;rId <= wb.SheetNames.length; ++rId) {
 		var wsrels = {'!id':{}};
 		var ws = wb.Sheets[wb.SheetNames[rId-1]];
@@ -11388,6 +11582,17 @@ f = "docProps/app.xml";
 			var need_vml = false;
 			var cf = "";
 			if(comments && comments.length > 0) {
+				var needtc = false;
+				comments.forEach(function(carr) {
+					carr[1].forEach(function(c) { if(c.T == true) needtc = true; });
+				});
+				if(needtc) {
+					cf = "xl/threadedComments/threadedComment" + rId + ".xml";
+					zip_add_file(zip, cf, write_tcmnt_xml(comments, people, opts));
+					ct.threadedcomments.push(cf);
+					add_rels(wsrels, -1, "../threadedComments/threadedComment" + rId + ".xml", RELS.TCMNT);
+				}
+
 				cf = "xl/comments" + rId + "." + wbext;
 				zip_add_file(zip, cf, write_comments_bin(comments, opts));
 				ct.comments.push(cf);
@@ -11442,6 +11647,13 @@ f = "docProps/app.xml";
 	zip_add_file(zip, f, write_xlmeta_bin());
 	ct.metadata.push(f);
 	add_rels(opts.wbrels, -1, "metadata." + wbext, RELS.XLMETA);
+
+	if(people.length > 1) {
+		f = "xl/persons/person.xml";
+		zip_add_file(zip, f, write_people_xml(people, opts));
+		ct.people.push(f);
+		add_rels(opts.wbrels, -1, "persons/person.xml", RELS.PEOPLE);
+	}
 
 	zip_add_file(zip, "[Content_Types].xml", write_ct(ct, opts));
 	zip_add_file(zip, '_rels/.rels', write_rels(opts.rels));
@@ -11948,7 +12160,7 @@ function make_json_row(sheet, r, R, cols, header, hdr, o) {
 	}
 	if(!dense || sheet["!data"][R]) for (var C = r.s.c; C <= r.e.c; ++C) {
 		var val = dense ? (sheet["!data"][R]||[])[C] : sheet[cols[C] + rr];
-		if(val === undefined || val.t === undefined) {
+		if(val == null || val.t === undefined) {
 			if(defval === undefined) continue;
 			if(hdr[C] != null) { row[hdr[C]] = defval; }
 			continue;
@@ -11957,7 +12169,12 @@ function make_json_row(sheet, r, R, cols, header, hdr, o) {
 		switch(val.t){
 			case 'z': if(v == null) break; continue;
 			case 'e': v = (v == 0 ? null : void 0); break;
-			case 's': case 'd': case 'b': case 'n': break;
+			case 's': case 'b':
+			case 'n': if(!val.z || !fmt_is_date(val.z)) break;
+			v = numdate(v); // TODO: date1904 setting should also be stored in worksheet object
+			if(typeof v == "number") break;
+			/* falls through */
+			case 'd': if(!(o && o.UTC)) v = utc_to_local(v); break;
 			default: throw new Error('unrecognized type ' + val.t);
 		}
 		if(hdr[C] != null) {
@@ -12167,6 +12384,7 @@ function sheet_add_json(_ws, js, opts) {
 				else if(typeof v == 'string') t = 's';
 				else if(v instanceof Date) {
 					t = 'd';
+					if(!o.UTC) v = local_to_utc(v);
 					if(!o.cellDates) { t = 'n'; v = datenum(v); }
 					z = (cell != null && cell.z && fmt_is_date(cell.z)) ? cell.z : (o.dateNF || table_fmt[14]);
 				}

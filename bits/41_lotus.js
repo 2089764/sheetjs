@@ -24,6 +24,22 @@ var WK_ = /*#__PURE__*/(function() {
 		throw "Unsupported type " + opts.type;
 	}
 
+	/* NOTE: this list intentionally starts at 1 */
+	var LOTUS_DATE_FMTS = [
+		"mmmm",
+		"dd-mmm-yyyy",
+		"dd-mmm",
+		"mmm-yyyy",
+		"@", // "text"?
+		"mm/dd",
+		"hh:mm:ss AM/PM", // 7
+		"hh:mm AM/PM",
+		"mm/dd/yyyy",
+		"mm/dd",
+		"hh:mm:ss",
+		"hh:mm" // 12
+	];
+
 	function lotus_to_workbook_buf(d, opts)/*:Workbook*/ {
 		if(!d) return d;
 		var o = opts || {};
@@ -34,6 +50,7 @@ var WK_ = /*#__PURE__*/(function() {
 
 		var refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 		var sheetRows = o.sheetRows || 0;
+		var lastcell = {};
 
 		if(d[4] == 0x51 && d[5] == 0x50 && d[6] == 0x57) return qpw_to_workbook_buf(d, opts);
 		if(d[2] == 0x00) {
@@ -65,9 +82,9 @@ var WK_ = /*#__PURE__*/(function() {
 				case 0x0E: /* NUMBER */
 				case 0x10: /* FORMULA */
 					/* TODO: actual translation of the format code */
-					if(RT == 0x0E && (val[2] & 0x70) == 0x70 && (val[2] & 0x0F) > 1 && (val[2] & 0x0F) < 15) {
-						val[1].z = o.dateNF || table_fmt[14];
-						if(o.cellDates) { val[1].t = 'd'; val[1].v = numdate(val[1].v); }
+					if((val[2] & 0x70) == 0x70 && (val[2] & 0x0F) > 1 && (val[2] & 0x0F) < 15) {
+						val[1].z = o.dateNF || LOTUS_DATE_FMTS[(val[2] & 0x0F)-1] || table_fmt[14];
+						if(o.cellDates) { val[1].v = numdate(val[1].v); val[1].t = typeof val[1].v == "number" ? 'n' : 'd'; }
 					}
 
 					if(o.qpro) {
@@ -86,15 +103,25 @@ var WK_ = /*#__PURE__*/(function() {
 						tmpcell.t = val[1].t; tmpcell.v = val[1].v;
 						if(val[1].z != null) tmpcell.z = val[1].z;
 						if(val[1].f != null) tmpcell.f = val[1].f;
+						lastcell = tmpcell;
 						break;
 					}
 					if(o.dense) {
 						if(!sdata[val[0].r]) sdata[val[0].r] = [];
 						sdata[val[0].r][val[0].c] = val[1];
 					} else s[encode_cell(val[0])] = val[1];
+					lastcell = val[1];
 					break;
 				case 0x5405: o.works2 = true; break;
-				default:
+				case 0x5402: {
+					/* TODO: enumerate all extended number formats */
+					if(val == 0x14a1) {
+						lastcell.z = "hh:mm:ss";
+						if(o.cellDates && lastcell.t == "n") {
+							lastcell.v = numdate(lastcell.v); lastcell.t = typeof lastcell.v == "number" ? 'n' : 'd';
+						}
+					}
+				} break;
 			}}, o);
 		} else if(d[2] == 0x1A || d[2] == 0x0E) {
 			o.Enum = WK3Enum;
@@ -171,10 +198,17 @@ var WK_ = /*#__PURE__*/(function() {
 				var cell = dense ? (ws["!data"][R]||[])[C] : ws[cols[C] + rr];
 				if(!cell || cell.t == "z") continue;
 				/* TODO: formula records */
-				if(cell.t == "n") {
-					if((cell.v|0)==cell.v && cell.v >= -32768 && cell.v <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, cell.v));
-					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, cell.v));
-				} else {
+				switch(cell.t) {
+				case "n":
+					if((cell.v|0)==cell.v && cell.v >= -32768 && cell.v <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, cell));
+					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, cell));
+					break;
+				case "d":
+					var dc = datenum(cell.v);
+					if((dc|0)==dc && dc >= -32768 && dc <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, {t:"n", v:dc, z:cell.z || table_fmt[14]}));
+					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, {t:"n", v:dc, z:cell.z || table_fmt[14]}));
+					break;
+				default:
 					var str = format_cell(cell);
 					write_biff_rec(ba, 0x0F, write_LABEL(R, C, str.slice(0, 239)));
 				}
@@ -308,11 +342,18 @@ var WK_ = /*#__PURE__*/(function() {
 		return o;
 	}
 
+	function get_wk1_fmt(cell)/*:number*/ {
+		/* TODO: some fuzzy matching on the number format */
+		if(cell.z && fmt_is_date(cell.z)) {
+			return 0xf0 | (LOTUS_DATE_FMTS.indexOf(cell.z) + 1 || 2);
+		}
+		return 0xFF;
+	}
 	function parse_LABEL(blob, length, opts) {
 		var tgt = blob.l + length;
 		var o = parse_cell(blob, length, opts);
 		o[1].t = 's';
-		if(opts.vers == 0x5120) {
+		if((opts.vers & 0xFFFE) == 0x5120) { // WQ1 / WQ2
 			blob.l++;
 			var len = blob.read_shift(1);
 			o[1].v = blob.read_shift(len, 'utf8');
@@ -354,12 +395,12 @@ var WK_ = /*#__PURE__*/(function() {
 		o[1].v = blob.read_shift(2, 'i');
 		return o;
 	}
-	function write_INTEGER(R, C, v) {
+	function write_INTEGER(R, C, cell) {
 		var o = new_buf(7);
-		o.write_shift(1, 0xFF);
+		o.write_shift(1, get_wk1_fmt(cell));
 		o.write_shift(2, C);
 		o.write_shift(2, R);
-		o.write_shift(2, v, 'i');
+		o.write_shift(2, cell.v, 'i');
 		return o;
 	}
 
@@ -368,12 +409,12 @@ var WK_ = /*#__PURE__*/(function() {
 		o[1].v = blob.read_shift(8, 'f');
 		return o;
 	}
-	function write_NUMBER(R, C, v) {
+	function write_NUMBER(R, C, cell) {
 		var o = new_buf(13);
-		o.write_shift(1, 0xFF);
+		o.write_shift(1, get_wk1_fmt(cell));
 		o.write_shift(2, C);
 		o.write_shift(2, R);
-		o.write_shift(8, v, 'f');
+		o.write_shift(8, cell.v, 'f');
 		return o;
 	}
 
@@ -426,7 +467,7 @@ var WK_ = /*#__PURE__*/(function() {
 		0x33: ["FALSE", 0],
 		0x34: ["TRUE", 0],
 		0x35: ["RAND", 0],
-		// 0x36 DATE
+		0x36: ["DATE", 3],
 		// 0x37 NOW
 		// 0x38 PMT
 		// 0x39 PV
@@ -436,7 +477,7 @@ var WK_ = /*#__PURE__*/(function() {
 		// 0x3D MONTH
 		// 0x3E YEAR
 		0x3F: ["ROUND", 2],
-		// 0x40 TIME
+		0x40: ["TIME", 3],
 		// 0x41 HOUR
 		// 0x42 MINUTE
 		// 0x43 SECOND
@@ -778,13 +819,24 @@ var WK_ = /*#__PURE__*/(function() {
 		/*::[*/0x0048/*::]*/: { n:"ACOMM" },
 		/*::[*/0x0049/*::]*/: { n:"AMACRO" },
 		/*::[*/0x004A/*::]*/: { n:"PARSE" },
+		// 0x0064
 		/*::[*/0x0066/*::]*/: { n:"PRANGES??" },
 		/*::[*/0x0067/*::]*/: { n:"RRANGES??" },
 		/*::[*/0x0068/*::]*/: { n:"FNAME??" },
 		/*::[*/0x0069/*::]*/: { n:"MRANGES??" },
+		// 0x0096
+		// 0x0099
+		// 0x009A
+		// 0x009B
+		// 0x009C
+		// 0x00C0
+		// 0x00C7
+		// 0x00C9
 		/*::[*/0x00CC/*::]*/: { n:"SHEETNAMECS", f:parse_SHEETNAMECS },
+		// 0x00CD
 		/*::[*/0x00DE/*::]*/: { n:"SHEETNAMELP", f:parse_SHEETNAMELP },
 		/*::[*/0x00FF/*::]*/: { n:"BOF", f:parseuint16 },
+		/*::[*/0x5402/*::]*/: { n:"WKSNF", f:parseuint16 },
 		/*::[*/0xFFFF/*::]*/: { n:"" }
 	};
 
@@ -914,6 +966,24 @@ var WK_ = /*#__PURE__*/(function() {
 		/*::[*/0xFFFF/*::]*/: { n:"" }
 	};
 
+	/* TODO: fill out and verify this table across QP versions */
+	var QPWNFTable = {
+		/*::[*/0x05/*::*/: "dd-mmm-yy",
+		/*::[*/0x06/*::*/: "dd-mmm",
+		/*::[*/0x07/*::*/: "mmm-yy",
+		/*::[*/0x08/*::*/: "mm/dd/yy", // Long Date Intl
+		/*::[*/0x0A/*::*/: "hh:mm:ss AM/PM",
+		/*::[*/0x0B/*::*/: "hh:mm AM/PM",
+		/*::[*/0x0E/*::*/: "dd-mmm-yyyy",
+		/*::[*/0x0F/*::*/: "mmm-yyyy",
+
+		/*::[*/0x22/*::*/: "0.00",
+		/*::[*/0x32/*::*/: "0.00;[Red]0.00",
+		/*::[*/0x42/*::*/: "0.00;\(0.00\)",
+		/*::[*/0x52/*::*/: "0.00;[Red]\(0.00\)",
+
+		/*::[*/162/*::*/: '"$"#,##0;\\("$"#,##0\\)' // slightly different from SSF 5
+	};
 	/* QPW uses a different set of record types */
 	function qpw_to_workbook_buf(d, opts)/*:Workbook*/ {
 		prep_blob(d, 0);
@@ -924,6 +994,7 @@ var WK_ = /*#__PURE__*/(function() {
 		var range = {s:{r:-1,c:-1}, e:{r:-1,c:-1}};
 		var cnt = 0, type = 0, C = 0, R = 0;
 		var wb = { SheetNames: [], Sheets: {} };
+		var FMTS = [];
 		outer: while(d.l < d.length) {
 			var RT = d.read_shift(2), length = d.read_shift(2);
 			var p = d.slice(d.l, d.l + length);
@@ -933,6 +1004,22 @@ var WK_ = /*#__PURE__*/(function() {
 					if(p.read_shift(4) != 0x39575051) throw "Bad QPW9 BOF!";
 					break;
 				case 0x02: /* EOF */ break outer;
+
+				case 0x08: /* NF */ break; // TODO: this is tied to custom number formats
+
+				case 0x0A: /* FORMATS */ {
+					var fcnt = p.read_shift(4);
+					var step = ((p.length - p.l)/ fcnt)|0;
+					for(var ifmt = 0; ifmt < fcnt; ++ifmt) {
+						var end = p.l + step;
+						var fmt = {};
+						p.l += 2;
+						fmt.numFmtId = p.read_shift(2);
+						if(QPWNFTable[fmt.numFmtId]) fmt.z = QPWNFTable[fmt.numFmtId];
+						p.l = end;
+						FMTS.push(fmt);
+					}
+				} break;
 
 				/* TODO: The behavior here should be consistent with Numbers: QP Notebook ~ .TN.SheetArchive, QP Sheet ~ .TST.TableModelArchive */
 				case 0x0401: /* BON */ break;
@@ -996,18 +1083,21 @@ var WK_ = /*#__PURE__*/(function() {
 					var CC = encode_col(C);
 					while(p.l < p.length) {
 						var cell = { t: "z" };
-						var flags = p.read_shift(1);
-						if(flags & 0x80) p.l += 2;
+						var flags = p.read_shift(1), fmtidx = -1;
+						if(flags & 0x80) fmtidx = p.read_shift(2);
 						var mul = (flags & 0x40) ? p.read_shift(2) - 1: 0;
 						switch(flags & 0x1F) {
+							case 0: break;
 							case 1: break;
 							case 2: cell = { t: "n", v: p.read_shift(2) }; break;
 							case 3: cell = { t: "n", v: p.read_shift(2, 'i') }; break;
+							case 4: cell = { t: "n", v: parse_RkNumber(p) }; break;
 							case 5: cell = { t: "n", v: p.read_shift(8, 'f') }; break;
 							case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
 							case 8: cell = { t: "n", v: p.read_shift(8, 'f') }; p.l += 2; /* cell.f = formulae[p.read_shift(4)]; */ p.l += 4; break;
 							default: throw "Unrecognized QPW cell type " + (flags & 0x1F);
 						}
+						if(fmtidx != -1 && (FMTS[fmtidx - 1]||{}).z) cell.z = FMTS[fmtidx-1].z;
 						var delta = 0;
 						if(flags & 0x20) switch(flags & 0x1F) {
 							case 2: delta = p.read_shift(2); break;
@@ -1016,10 +1106,14 @@ var WK_ = /*#__PURE__*/(function() {
 							default: throw "Unsupported delta for QPW cell type " + (flags & 0x1F);
 						}
 						if(!(!o.sheetStubs && cell.t == "z")) {
+							var newcell = dup(cell);
+							if(cell.t == "n" && cell.z && fmt_is_date(cell.z) && o.cellDates) {
+								newcell.v = numdate(cell.v); newcell.t = typeof newcell.v == "number" ? 'n' : 'd';
+							}
 							if(s["!data"] != null) {
 								if(!s["!data"][R]) s["!data"][R] = [];
-								s["!data"][R][C] = cell;
-							} else s[CC + encode_row(R)] = cell;
+								s["!data"][R][C] = newcell;
+							} else s[CC + encode_row(R)] = newcell;
 						}
 						++R; --cnt;
 						while(mul-- > 0 && cnt >= 0) {
@@ -1034,6 +1128,7 @@ var WK_ = /*#__PURE__*/(function() {
 								case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
 								default: throw "Cannot apply repeat for QPW cell type " + (flags & 0x1F);
 							}
+							if(fmtidx != -1);
 							if(!(!o.sheetStubs && cell.t == "z")) {
 								if(s["!data"] != null) {
 									if(!s["!data"][R]) s["!data"][R] = [];

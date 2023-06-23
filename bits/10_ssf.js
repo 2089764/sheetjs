@@ -203,15 +203,6 @@ function SSF_parse_date_code(v/*:number*/,opts/*:?any*/,b2/*:?boolean*/) {
 	out.q = dow;
 	return out;
 }
-var SSFbasedate = /*#__PURE__*/new Date(1899, 11, 31, 0, 0, 0);
-var SSFdnthresh = /*#__PURE__*/SSFbasedate.getTime();
-var SSFbase1904 = /*#__PURE__*/new Date(1900, 2, 1, 0, 0, 0);
-function datenum_local(v/*:Date*/, date1904/*:?boolean*/)/*:number*/ {
-	var epoch = /*#__PURE__*/v.getTime();
-	if(date1904) epoch -= 1461*24*60*60*1000;
-	else if(v >= SSFbase1904) epoch += 24*60*60*1000;
-	return (epoch - (SSFdnthresh + (/*#__PURE__*/v.getTimezoneOffset() - /*#__PURE__*/SSFbasedate.getTimezoneOffset()) * 60000)) / (24 * 60 * 60 * 1000);
-}
 /* ECMA-376 18.8.30 numFmt*/
 /* Note: `toPrecision` uses standard form when prec > E and E >= -6 */
 /* exponent >= -9 and <= 9 */
@@ -269,7 +260,7 @@ function SSF_general(v/*:any*/, opts/*:any*/) {
 		case 'undefined': return "";
 		case 'object':
 			if(v == null) return "";
-			if(v instanceof Date) return SSF_format(14, datenum_local(v, opts && opts.date1904), opts);
+			if(v instanceof Date) return SSF_format(14, datenum(v, opts && opts.date1904), opts);
 	}
 	throw new Error("unsupported value in General format: " + v);
 }
@@ -957,7 +948,7 @@ function SSF_format(fmt/*:string|number*/,v/*:any*/,o/*:?any*/) {
 			break;
 	}
 	if(SSF_isgeneral(sfmt,0)) return SSF_general(v, o);
-	if(v instanceof Date) v = datenum_local(v, o.date1904);
+	if(v instanceof Date) v = datenum(v, o.date1904);
 	var f = choose_fmt(sfmt, v);
 	if(SSF_isgeneral(f[1])) return SSF_general(v, o);
 	if(v === true) v = "TRUE"; else if(v === false) v = "FALSE";

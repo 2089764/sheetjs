@@ -31,16 +31,7 @@ function write_biff_continue(ba/*:BufArray*/, type/*:number*/, payload, length/*
 	}
 }
 
-function write_BIFF2Cell(out, r/*:number*/, c/*:number*/) {
-	if(!out) out = new_buf(7);
-	out.write_shift(2, r);
-	out.write_shift(2, c);
-	out.write_shift(2, 0);
-	out.write_shift(1, 0);
-	return out;
-}
-
-function write_BIFF2BERR(r/*:number*/, c/*:number*/, val, t/*:?string*/) {
+function write_BIFF2BERR(r/*:number*/, c/*:number*/, val, t/*:string*/) {
 	var out = new_buf(9);
 	write_BIFF2Cell(out, r, c);
 	write_Bes(val, t || 'b', out);
@@ -67,29 +58,48 @@ function write_comments_biff2(ba/*:BufArray*/, comments/*:Array<[Comment[], numb
 	});
 }
 
-function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*//*::, opts*/) {
+/* TODO: BIFF3/4 use different records -- see comments*/
+function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, date1904/*:boolean*/) {
+	var ifmt = 0;
+	if(cell.z != null) {
+		ifmt = opts._BIFF2FmtTable.indexOf(cell.z);
+		if(ifmt == -1) { opts._BIFF2FmtTable.push(cell.z); ifmt = opts._BIFF2FmtTable.length - 1; }
+	}
+	var ixfe = 0;
+	if(cell.z != null) {
+		for(; ixfe < opts.cellXfs.length; ++ixfe) if(opts.cellXfs[ixfe].numFmtId == ifmt) break;
+		if(ixfe == opts.cellXfs.length) opts.cellXfs.push({numFmtId: ifmt});
+	}
 	if(cell.v != null) switch(cell.t) {
 		case 'd': case 'n':
-			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
-			if((v == (v|0)) && (v >= 0) && (v < 65536))
-				write_biff_rec(ba, 0x0002, write_BIFF2INT(R, C, v));
+			var v = cell.t == 'd' ? datenum(parseDate(cell.v, date1904), date1904) : cell.v;
+			if(opts.biff == 2 && (v == (v|0)) && (v >= 0) && (v < 65536))
+				// 0x027E (RK) in BIFF3/4
+				write_biff_rec(ba, 0x0002, write_BIFF2INT(R, C, v, ixfe, ifmt));
 			else if(isNaN(v))
+				// 0x0205 in BIFF3/4
 				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x24, "e")); // #NUM!
 			else if(!isFinite(v))
+				// 0x0205 in BIFF3/4
 				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x07, "e")); // #DIV/0!
 			else
-				write_biff_rec(ba, 0x0003, write_BIFF2NUM(R,C, v));
+				// 0x0203 in BIFF3/4
+				write_biff_rec(ba, 0x0003, write_BIFF2NUM(R,C, v, ixfe, ifmt));
 			return;
-		case 'b': case 'e': write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, cell.v, cell.t)); return;
+		case 'b': case 'e':
+			// 0x0205 in BIFF3/4
+			write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, cell.v, cell.t)); return;
 		/* TODO: codepage, sst */
 		case 's': case 'str':
+			// 0x0204 in BIFF3/4
 			write_biff_rec(ba, 0x0004, write_BIFF2LABEL(R, C, cell.v == null ? "" : String(cell.v).slice(0,255)));
 			return;
 	}
+	// 0x0201 in BIFF3/4
 	write_biff_rec(ba, 0x0001, write_BIFF2Cell(null, R, C));
 }
 
-function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
+function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts, wb/*:Workbook*/) {
 	var dense = ws["!data"] != null;
 	var range = safe_decode_range(ws['!ref'] || "A1"), ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
 	if(range.e.c > 0xFF || range.e.r > 0x3FFF) {
@@ -97,7 +107,9 @@ function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/
 		range.e.c = Math.min(range.e.c, 0xFF);
 		range.e.r = Math.min(range.e.c, 0x3FFF);
 	}
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	var row = [], comments = [];
+	/* TODO: 0x0000 / 0x0200 dimensions? */
 	for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(var R = range.s.r; R <= range.e.r; ++R) {
 		if(dense) row = ws["!data"][R] || [];
@@ -106,7 +118,7 @@ function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/
 			var cell = dense ? row[C] : ws[cols[C] + rr];
 			if(!cell) continue;
 			/* write cell */
-			write_ws_biff2_cell(ba, cell, R, C, opts);
+			write_ws_biff2_cell(ba, cell, R, C, opts, date1904);
 			if(cell.c) comments.push([cell.c, R, C]);
 		}
 	}
@@ -119,14 +131,32 @@ function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/
 /* Based on test files */
 function write_biff2_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 	var o = opts || {};
+
 	var ba = buf_array();
 	var idx = 0;
 	for(var i=0;i<wb.SheetNames.length;++i) if(wb.SheetNames[i] == o.sheet) idx=i;
 	if(idx == 0 && !!o.sheet && wb.SheetNames[0] != o.sheet) throw new Error("Sheet not found: " + o.sheet);
 	write_biff_rec(ba, (o.biff == 4 ? 0x0409 : (o.biff == 3 ? 0x0209 : 0x0009)), write_BOF(wb, 0x10, o));
-	/* ... */
-	write_ws_biff2(ba, wb.Sheets[wb.SheetNames[idx]], idx, o, wb);
-	/* ... */
+	if(((wb.Workbook||{}).WBProps||{}).date1904) write_biff_rec(ba, 0x0022, writebool(true));
+	o.cellXfs = [{numFmtId: 0}];
+	o._BIFF2FmtTable/*:Array<string>*/ = ["General"]; o._Fonts = [];
+	var body = buf_array();
+	write_ws_biff2(body, wb.Sheets[wb.SheetNames[idx]], idx, o, wb);
+
+	o._BIFF2FmtTable.forEach(function(f) {
+		if(o.biff <= 3) write_biff_rec(ba, 0x001E, write_BIFF2Format(f));
+		else write_biff_rec(ba, 0x041E, write_BIFF4Format(f));
+	});
+	o.cellXfs.forEach(function(xf) {
+		switch(o.biff) {
+			case 2: write_biff_rec(ba, 0x0043, write_BIFF2XF(xf)); break;
+			case 3: write_biff_rec(ba, 0x0243, write_BIFF3XF(xf)); break;
+			case 4: write_biff_rec(ba, 0x0443, write_BIFF4XF(xf)); break;
+		}
+	});
+	delete o._BIFF2FmtTable; delete o.cellXfs; delete o._Fonts;
+
+	ba.push(body.end());
 	write_biff_rec(ba, 0x000A);
 	return ba.end();
 }
@@ -147,7 +177,7 @@ function write_MsoDrawingGroup() {
 		{
 			buf.write_shift(4, b8oid);
 			buf.write_shift(4, b8ocnts.length+1);
-			buf.write_shift(4, b8ocnts.reduce(function(acc,x) { return acc+x[1]; }, 0));
+			var acc = 0; for(var i = 0; i < b8ocnts.length; ++i) acc += (b8ocnts[i] && b8ocnts[i][1] || 0); buf.write_shift(4, acc);
 			buf.write_shift(4, b8ocnts.length);
 		}
 		/* 2.2.46 OfficeArtIDCL + */
@@ -185,7 +215,7 @@ function write_comments_biff8(ba/*:BufArray*/, comments/*:Array<[Comment[], numb
 	var _oasc;
 	comments.forEach(function(c, ci) {
 		var author = "";
-		var text = c[0].map(function(t) { if(t.a && !author) author = t.a; return t.t }).join("");
+		var text = c[0].map(function(t) { if(t.a && !author) author = t.a; return t.t; }).join("");
 		++b8oid;
 
 		/* 2.2.14 OfficeArtSpContainer */
@@ -336,7 +366,7 @@ function write_comments_biff8(ba/*:BufArray*/, comments/*:Array<[Comment[], numb
 	/* [MS-ODRAW] 2.2.13 OfficeArtDgContainer */
 	{
 		var hdr = new_buf(80);
-		hdr.write_shift(2, 0x0F)
+		hdr.write_shift(2, 0x0F);
 		hdr.write_shift(2, 0xF002);
 		hdr.write_shift(4, sz + hdr.length - 8);
 		/* [MS-ODRAW] 2.2.49 OfficeArtFDG */
@@ -443,7 +473,7 @@ function write_ws_cols_biff8(ba, cols) {
 	});
 }
 
-function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts) {
+function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, date1904/*:boolean*/) {
 	var os = 16 + get_cell_style(opts.cellXfs, cell, opts);
 	if(cell.v == null && !cell.bf) {
 		write_biff_rec(ba, 0x0201 /* Blank */, write_XLSCell(R, C, os));
@@ -452,7 +482,7 @@ function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 	if(cell.bf) write_biff_rec(ba, 0x0006 /* Formula */, write_Formula(cell, R, C, opts, os));
 	else switch(cell.t) {
 		case 'd': case 'n':
-			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
+			var v = cell.t == 'd' ? datenum(parseDate(cell.v, date1904), date1904) : cell.v;
 			if(isNaN(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x24, os, opts, "e")); // #NUM!
 			else if(!isFinite(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x07, os, opts, "e")); // #DIV/0!
 			/* TODO: emit RK as appropriate */
@@ -513,6 +543,7 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	write_biff_rec(ba, 0x0200 /* Dimensions */, write_Dimensions(range, opts));
 	/* ... */
 
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	if(b8) ws['!links'] = [];
 	var comments = [];
 	var row = [];
@@ -525,7 +556,7 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 			var cell = dense ? row[C] : ws[ref];
 			if(!cell) continue;
 			/* write cell */
-			write_ws_biff8_cell(ba, cell, R, C, opts);
+			write_ws_biff8_cell(ba, cell, R, C, opts, date1904);
 			if(b8 && cell.l) ws['!links'].push([ref, cell.l]);
 			if(cell.c) comments.push([cell.c, R, C]);
 		}

@@ -107,13 +107,13 @@ dist-deps: ## Copy dependencies for distribution
 .PHONY: aux
 aux: $(AUXTARGETS)
 
-BYTEFILEC=dist/xlsx.{full,core,mini}.min.js
-BYTEFILER=dist/xlsx.extendscript.js xlsx.mjs
+BYTEFILEC=dist/xlsx.{full,core,mini}.min.js xlsx.mjs
+BYTEFILER=dist/xlsx.extendscript.js
 .PHONY: bytes
 bytes: ## Display minified and gzipped file sizes
 	@for i in $(BYTEFILEC); do npx printj "%-30s %7d %10d" $$i $$(wc -c < $$i) $$(gzip --best --stdout $$i | wc -c); done
 	@for i in $(BYTEFILER); do npx printj "%-30s %7d" $$i $$(wc -c < $$i); done
-	@npx printj "%-30s         %10d" "treeshake" "$$(npx esbuild@0.14.14 --bundle misc/import.js | wc -c)"
+	@npx printj "%-30s         %10d" "treeshake" "$$(npx -y esbuild@0.14.14 --bundle misc/import.js | wc -c)"
 
 
 .PHONY: git
@@ -141,6 +141,10 @@ test mocha: test.js ## Run test suite
 #*                      To run tests for one format, make test_<fmt>
 #*                      To run the core test suite, make test_misc
 
+.PHONY: testdot
+testdot: test.js ## Run test suite using dot reporter
+	mocha -R dot -t 30000
+
 .PHONY: test-esm
 test-esm: test.mjs ## Run Node ESM test suite
 	npx -y mocha@9 -R spec -t 30000 $<
@@ -164,6 +168,11 @@ TESTFMT=$(patsubst %,test_%,$(FMT))
 .PHONY: $(TESTFMT)
 $(TESTFMT): test_%:
 	FMTS=$* make test
+
+TESTFMT=$(patsubst %,testdot_%,$(FMT))
+.PHONY: $(TESTFMT)
+$(TESTFMT): testdot_%:
+	FMTS=$* make testdot
 
 TESTESMFMT=$(patsubst %,test-esm_%,$(FMT))
 .PHONY: $(TESTESMFMT)
